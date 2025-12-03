@@ -432,3 +432,24 @@ export const deleteUserTemplate = async (templateId: string): Promise<ApiRespons
   return response.data;
 };
 
+// ===== SAM 智能抠图 Demo =====
+
+export interface ObjectCutoutResult {
+  foreground_url: string;
+  background_url: string;
+}
+
+export const objectCutout = async (
+  image: File,
+  rect: { x: number; y: number; width: number; height: number }
+): Promise<ApiResponse<ObjectCutoutResult>> => {
+  const formData = new FormData();
+  formData.append('image', image);
+  formData.append('rect', JSON.stringify(rect));
+  const response = await apiClient.post<ApiResponse<ObjectCutoutResult>>(
+    '/api/tools/object-cutout',
+    formData
+  );
+  return response.data;
+};
+

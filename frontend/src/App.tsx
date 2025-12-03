@@ -5,6 +5,7 @@ import { History } from './pages/History';
 import { OutlineEditor } from './pages/OutlineEditor';
 import { DetailEditor } from './pages/DetailEditor';
 import { SlidePreview } from './pages/SlidePreview';
+import { ObjectCutoutDemo } from './pages/ObjectCutoutDemo';
 import { useProjectStore } from './store/useProjectStore';
 import { Loading, useToast, GithubLink } from './components/shared';
 
@@ -36,6 +37,8 @@ function App() {
         <Route path="/project/:projectId/outline" element={<OutlineEditor />} />
         <Route path="/project/:projectId/detail" element={<DetailEditor />} />
         <Route path="/project/:projectId/preview" element={<SlidePreview />} />
+        {/* 隐藏实验页面：智能抠图 + Inpaint Demo（无导航入口，仅通过路径访问） */}
+        <Route path="/secret/object-cutout" element={<ObjectCutoutDemo />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ToastContainer />
