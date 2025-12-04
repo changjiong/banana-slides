@@ -675,7 +675,7 @@ export const SlidePreview: React.FC = () => {
             icon={<MessageCircle size={18} />}
             onClick={() => setIsAgentWindowOpen((prev) => !prev)}
           >
-            {isAgentWindowOpen ? '关闭助手' : 'AI助手'}
+            {"Agent"}
           </Button>
           <div className="relative">
             <Button

@@ -95,34 +95,42 @@ export const AgentWindow: React.FC<AgentWindowProps> = ({ isOpen, onClose }) => 
 
   return (
     <div
-      className={`h-full w-full bg-white shadow-lg flex flex-col border-l border-gray-200 transform transition-transform transition-opacity duration-200 ease-out ${
+      className={`h-full w-full flex flex-col bg-gradient-to-b from-white via-gray-50 to-gray-100 border-l border-gray-200 shadow-xl transform transition-transform transition-opacity duration-200 ease-out ${
         isEntering ? 'translate-x-0 opacity-100' : 'translate-x-4 opacity-0'
       }`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-banana-500 to-banana-600 text-white">
-        <div className="flex items-center gap-2">
-          <MessageCircle size={20} />
-          <h3 className="font-semibold">AI 助手</h3>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-banana-100 text-banana-700">
+              <MessageCircle size={16} />
+            </div>
+            <h3 className="text-sm font-semibold text-gray-900">Agent</h3>
+          </div>
+          <p className="text-[11px] text-gray-500 pl-9">
+            用自然语言描述你想对当前页面做的调整
+          </p>
         </div>
         <button
           onClick={onClose}
-          className="p-1 hover:bg-white/20 rounded transition-colors"
+          className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors"
           aria-label="关闭"
         >
-          <X size={18} />
+          <X size={16} />
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 ? (
-          <div className="text-center text-gray-500 mt-8">
-            <MessageCircle size={48} className="mx-auto mb-4 opacity-50" />
-            <p className="text-sm">开始与AI助手对话</p>
-            <p className="text-xs mt-2 text-gray-400">
-              可以要求编辑图片、更新描述、修改大纲等
-            </p>
+          <div className="mt-8 rounded-2xl bg-white/80 border border-dashed border-gray-200 px-4 py-3 text-xs text-gray-500">
+            <p className="font-medium text-gray-700 mb-2">你可以这样问：</p>
+            <ul className="space-y-1 list-disc list-inside">
+              <li>“帮我把当前页的背景换成深色渐变”</li>
+              <li>“优化这页的文案，让语气更正式一些”</li>
+              <li>“根据当前大纲重写这页的要点”</li>
+            </ul>
           </div>
         ) : (
           messages.map((message, index) => (
@@ -131,13 +139,13 @@ export const AgentWindow: React.FC<AgentWindowProps> = ({ isOpen, onClose }) => 
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] rounded-lg p-3 ${
+                className={`max-w-[80%] px-3 py-2.5 rounded-2xl text-sm leading-relaxed ${
                   message.role === 'user'
-                    ? 'bg-banana-500 text-white'
-                    : 'bg-white text-gray-800 border border-gray-200'
+                    ? 'bg-banana-500 text-white rounded-br-sm shadow-sm'
+                    : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'
                 }`}
               >
-                <p className="text-sm whitespace-pre-wrap break-words">
+                <p className="whitespace-pre-wrap break-words">
                   {message.content}
                 </p>
                 <p
@@ -156,7 +164,7 @@ export const AgentWindow: React.FC<AgentWindowProps> = ({ isOpen, onClose }) => 
         )}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
+            <div className="bg-white rounded-2xl px-3 py-2 border border-gray-200 shadow-sm">
               <Loader2 size={16} className="animate-spin text-banana-500" />
             </div>
           </div>
@@ -165,14 +173,14 @@ export const AgentWindow: React.FC<AgentWindowProps> = ({ isOpen, onClose }) => 
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-gray-200 bg-white">
-        <div className="flex gap-2">
+      <div className="px-4 py-3 border-t border-gray-200 bg-white/95 backdrop-blur-sm">
+        <div className="flex gap-2 items-end">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="输入消息... (Enter发送, Shift+Enter换行)"
-            className="flex-1 min-h-[60px] max-h-[120px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-banana-500 resize-none text-sm"
+            className="flex-1 min-h-[60px] max-h-[120px] px-3 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-banana-500/70 focus:border-banana-400 resize-none bg-gray-50"
             disabled={isLoading}
           />
           <Button
