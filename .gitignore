@@ -27,6 +27,7 @@
 !frontend/public/**/*.avif
 *.md
 !README.md
+!DEPLOYMENT.md
 *.pyc
 .env
 *.ppt
