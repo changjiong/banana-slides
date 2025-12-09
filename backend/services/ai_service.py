@@ -605,3 +605,25 @@ class AIService:
         else:
             raise ValueError("Expected a list of page descriptions, but got: " + str(type(descriptions)))
 
+
+def get_ai_service() -> AIService:
+    """
+    Factory function to get an AIService instance with the correct configuration.
+    Prioritizes user settings over system defaults.
+    
+    Returns:
+        AIService instance configured with the appropriate API key and base URL
+    
+    Raises:
+        ValueError: If no API key is configured
+    """
+    from services.config_service import config_service
+    
+    api_key = config_service.get_google_api_key()
+    api_base = config_service.get_google_api_base()
+    
+    if not api_key:
+        raise ValueError("Google API Key 未配置。请在设置页面配置您的 API Key，或联系管理员配置系统默认 Key。")
+    
+    logger.debug(f"Creating AIService with api_base: {api_base}")
+    return AIService(api_key=api_key, api_base=api_base)
