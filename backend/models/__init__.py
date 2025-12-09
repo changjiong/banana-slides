@@ -13,6 +13,8 @@ db = SQLAlchemy(
     }
 )
 
+from .user import User
+from .user_settings import UserSettings
 from .project import Project
 from .page import Page
 from .task import Task
@@ -21,5 +23,5 @@ from .page_image_version import PageImageVersion
 from .material import Material
 from .reference_file import ReferenceFile
 
-__all__ = ['db', 'Project', 'Page', 'Task', 'UserTemplate', 'PageImageVersion', 'Material', 'ReferenceFile']
+__all__ = ['db', 'User', 'UserSettings', 'Project', 'Page', 'Task', 'UserTemplate', 'PageImageVersion', 'Material', 'ReferenceFile']
 
