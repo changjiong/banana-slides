@@ -2,7 +2,8 @@
 Project Controller - handles project-related endpoints
 """
 import logging
-from flask import Blueprint, request, jsonify
+import uuid
+from flask import Blueprint, request, jsonify, g, make_response
 from models import db, Project, Page, Task, ReferenceFile
 from utils import success_response, error_response, not_found, bad_request
 from utils.decorators import optional_auth
@@ -11,6 +12,7 @@ from services.task_manager import task_manager, generate_descriptions_task, gene
 import json
 import traceback
 from datetime import datetime
+from sqlalchemy import or_
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +105,14 @@ def _reconstruct_outline_from_pages(pages: list) -> list:
 
 
 @project_bp.route('', methods=['GET'])
+@optional_auth
 def list_projects():
     """
-    GET /api/projects - Get all projects (for history)
+    GET /api/projects - Get user's projects (for history)
+    
+    Security:
+    - Logged-in users: only see their own projects
+    - Guests: only see projects created in their session (via session_id cookie)
     
     Query params:
     - limit: number of projects to return (default: 50)
@@ -117,12 +124,31 @@ def list_projects():
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
         
+        # Build query based on authentication status
+        query = Project.query
+        
+        if g.current_user:
+            # Logged-in user: only their projects
+            query = query.filter(Project.user_id == g.current_user.id)
+        else:
+            # Guest: only projects matching their session_id
+            session_id = request.cookies.get('guest_session_id')
+            if session_id:
+                query = query.filter(Project.session_id == session_id)
+            else:
+                # No session cookie means no projects visible
+                return success_response({
+                    'projects': [],
+                    'total': 0
+                })
+        
         # Get projects ordered by updated_at descending
-        projects = Project.query.order_by(desc(Project.updated_at)).limit(limit).offset(offset).all()
+        total = query.count()
+        projects = query.order_by(desc(Project.updated_at)).limit(limit).offset(offset).all()
         
         return success_response({
             'projects': [project.to_dict(include_pages=True) for project in projects],
-            'total': Project.query.count()
+            'total': total
         })
     
     except Exception as e:
@@ -130,9 +156,14 @@ def list_projects():
 
 
 @project_bp.route('', methods=['POST'])
+@optional_auth
 def create_project():
     """
     POST /api/projects - Create a new project
+    
+    Security:
+    - Logged-in users: project is associated with their user_id
+    - Guests: project is associated with a session_id (stored in cookie)
     
     Request body:
     {
@@ -154,23 +185,56 @@ def create_project():
         if creation_type not in ['idea', 'outline', 'descriptions']:
             return bad_request("Invalid creation_type")
         
-        # Create project
+        # Determine user_id and session_id based on authentication
+        user_id = None
+        session_id = None
+        new_session_id = None  # Track if we need to set a new cookie
+        
+        if g.current_user:
+            # Logged-in user
+            user_id = g.current_user.id
+        else:
+            # Guest user: use or create session_id
+            session_id = request.cookies.get('guest_session_id')
+            if not session_id:
+                session_id = str(uuid.uuid4())
+                new_session_id = session_id  # Will set cookie in response
+        
+        # Create project with ownership
         project = Project(
             creation_type=creation_type,
             idea_prompt=data.get('idea_prompt'),
             outline_text=data.get('outline_text'),
             description_text=data.get('description_text'),
-            status='DRAFT'
+            status='DRAFT',
+            user_id=user_id,
+            session_id=session_id
         )
         
         db.session.add(project)
         db.session.commit()
         
-        return success_response({
+        response_data = {
             'project_id': project.id,
             'status': project.status,
             'pages': []
-        }, status_code=201)
+        }
+        
+        # If we created a new session_id, set it as a cookie
+        if new_session_id:
+            response = make_response(success_response(response_data, status_code=201))
+            # Set cookie for 30 days, httponly for security
+            response.set_cookie(
+                'guest_session_id',
+                new_session_id,
+                max_age=30*24*60*60,  # 30 days
+                httponly=True,
+                samesite='Lax',
+                secure=request.is_secure  # Only secure if HTTPS
+            )
+            return response
+        
+        return success_response(response_data, status_code=201)
     
     except Exception as e:
         db.session.rollback()
@@ -179,16 +243,37 @@ def create_project():
         return error_response('SERVER_ERROR', str(e), 500)
 
 
+def _check_project_access(project):
+    """
+    Check if the current user/guest has access to the project.
+    Returns True if access is allowed, False otherwise.
+    """
+    if g.current_user:
+        # Logged-in user: must own the project
+        return project.user_id == g.current_user.id
+    else:
+        # Guest: project must match their session_id
+        session_id = request.cookies.get('guest_session_id')
+        return session_id and project.session_id == session_id
+
+
 @project_bp.route('/<project_id>', methods=['GET'])
+@optional_auth
 def get_project(project_id):
     """
     GET /api/projects/{project_id} - Get project details
+    
+    Security: Only project owner or session owner can access
     """
     try:
         project = Project.query.get(project_id)
         
         if not project:
             return not_found('Project')
+        
+        # Check access permission
+        if not _check_project_access(project):
+            return error_response('FORBIDDEN', 'You do not have access to this project', 403)
         
         return success_response(project.to_dict(include_pages=True))
     
@@ -197,9 +282,12 @@ def get_project(project_id):
 
 
 @project_bp.route('/<project_id>', methods=['PUT'])
+@optional_auth
 def update_project(project_id):
     """
     PUT /api/projects/{project_id} - Update project
+    
+    Security: Only project owner or session owner can update
     
     Request body:
     {
@@ -212,6 +300,10 @@ def update_project(project_id):
         
         if not project:
             return not_found('Project')
+        
+        # Check access permission
+        if not _check_project_access(project):
+            return error_response('FORBIDDEN', 'You do not have access to this project', 403)
         
         data = request.get_json()
         
@@ -242,15 +334,22 @@ def update_project(project_id):
 
 
 @project_bp.route('/<project_id>', methods=['DELETE'])
+@optional_auth
 def delete_project(project_id):
     """
     DELETE /api/projects/{project_id} - Delete project
+    
+    Security: Only project owner or session owner can delete
     """
     try:
         project = Project.query.get(project_id)
         
         if not project:
             return not_found('Project')
+        
+        # Check access permission
+        if not _check_project_access(project):
+            return error_response('FORBIDDEN', 'You do not have access to this project', 403)
         
         # Delete project files
         from services import FileService
