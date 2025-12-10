@@ -2,9 +2,11 @@
 Template Controller - handles template-related endpoints
 """
 import logging
-from flask import Blueprint, request, current_app
+import uuid
+from flask import Blueprint, request, current_app, g, make_response
 from models import db, Project, UserTemplate
 from utils import success_response, error_response, not_found, bad_request, allowed_file
+from utils.decorators import optional_auth
 from services import FileService
 from datetime import datetime
 
@@ -110,10 +112,29 @@ def get_system_templates():
 
 # ========== User Template Endpoints ==========
 
+def _check_template_access(template):
+    """
+    Check if the current user/guest has access to the template.
+    Returns True if access is allowed, False otherwise.
+    """
+    if g.current_user:
+        # Logged-in user: must own the template
+        return template.user_id == g.current_user.id
+    else:
+        # Guest: template must match their session_id
+        session_id = request.cookies.get('guest_session_id')
+        return session_id and template.session_id == session_id
+
+
 @user_template_bp.route('', methods=['POST'])
+@optional_auth
 def upload_user_template():
     """
     POST /api/user-templates - Upload user template image
+    
+    Security:
+    - Logged-in users: template is associated with their user_id
+    - Guests: template is associated with a session_id (stored in cookie)
     
     Content-Type: multipart/form-data
     Form: template_image=@file.png
@@ -144,22 +165,49 @@ def upload_user_template():
         file.seek(0)  # Reset to beginning
         
         # Generate template ID first
-        import uuid
         template_id = str(uuid.uuid4())
+        
+        # Determine user_id and session_id based on authentication
+        user_id = None
+        session_id = None
+        new_session_id = None
+        
+        if g.current_user:
+            user_id = g.current_user.id
+        else:
+            session_id = request.cookies.get('guest_session_id')
+            if not session_id:
+                session_id = str(uuid.uuid4())
+                new_session_id = session_id
         
         # Save template file first (using the generated ID)
         file_service = FileService(current_app.config['UPLOAD_FOLDER'])
         file_path = file_service.save_user_template(file, template_id)
         
-        # Create template record with file_path already set
+        # Create template record with ownership
         template = UserTemplate(
             id=template_id,
             name=name,
             file_path=file_path,
-            file_size=file_size
+            file_size=file_size,
+            user_id=user_id,
+            session_id=session_id
         )
         db.session.add(template)
         db.session.commit()
+        
+        # If we created a new session_id, set it as a cookie
+        if new_session_id:
+            response = make_response(success_response(template.to_dict()))
+            response.set_cookie(
+                'guest_session_id',
+                new_session_id,
+                max_age=30*24*60*60,
+                httponly=True,
+                samesite='Lax',
+                secure=request.is_secure
+            )
+            return response
         
         return success_response(template.to_dict())
     
@@ -170,18 +218,35 @@ def upload_user_template():
         logger.error(f"Error uploading user template: {error_msg}", exc_info=True)
         # 在开发环境中返回详细错误，生产环境返回通用错误
         if current_app.config.get('DEBUG', False):
-            return error_response('SERVER_ERROR', f"{error_msg}\n{traceback_str}", 500)
+            return error_response('SERVER_ERROR', f"{error_msg}", 500)
         else:
             return error_response('SERVER_ERROR', error_msg, 500)
 
 
 @user_template_bp.route('', methods=['GET'])
+@optional_auth
 def list_user_templates():
     """
     GET /api/user-templates - Get list of user templates
+    
+    Security:
+    - Logged-in users: only see their own templates
+    - Guests: only see templates created in their session
     """
     try:
-        templates = UserTemplate.query.order_by(UserTemplate.created_at.desc()).all()
+        # Build query based on authentication status
+        query = UserTemplate.query
+        
+        if g.current_user:
+            query = query.filter(UserTemplate.user_id == g.current_user.id)
+        else:
+            session_id = request.cookies.get('guest_session_id')
+            if session_id:
+                query = query.filter(UserTemplate.session_id == session_id)
+            else:
+                return success_response({'templates': []})
+        
+        templates = query.order_by(UserTemplate.created_at.desc()).all()
         
         return success_response({
             'templates': [template.to_dict() for template in templates]
@@ -192,15 +257,22 @@ def list_user_templates():
 
 
 @user_template_bp.route('/<template_id>', methods=['DELETE'])
+@optional_auth
 def delete_user_template(template_id):
     """
     DELETE /api/user-templates/{template_id} - Delete user template
+    
+    Security: Only template owner or session owner can delete
     """
     try:
         template = UserTemplate.query.get(template_id)
         
         if not template:
             return not_found('UserTemplate')
+        
+        # Check access permission
+        if not _check_template_access(template):
+            return error_response('FORBIDDEN', 'You do not have access to this template', 403)
         
         # Delete template file
         file_service = FileService(current_app.config['UPLOAD_FOLDER'])

@@ -13,6 +13,8 @@ class UserTemplate(db.Model):
     __tablename__ = 'user_templates'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)  # For logged-in users
+    session_id = db.Column(db.String(64), nullable=True, index=True)  # For guest session isolation
     name = db.Column(db.String(200), nullable=True)  # Optional template name
     file_path = db.Column(db.String(500), nullable=False)
     file_size = db.Column(db.Integer, nullable=True)  # File size in bytes
