@@ -16,6 +16,67 @@ import { test, expect } from '@playwright/test'
 import * as fs from 'fs'
 import * as path from 'path'
 
+const MOCK_PROJECT_ID = 'mock-project-123'
+const MOCK_PAGE_TITLES = ['什么是AI', 'AI的应用', 'AI的未来']
+const FRONTEND_DIR = process.cwd().endsWith('frontend')
+  ? process.cwd()
+  : path.join(process.cwd(), 'frontend')
+
+type MockStage = 'draft' | 'outline' | 'descriptions' | 'images'
+
+function buildMockProject(stage: MockStage) {
+  const statusByStage = {
+    draft: 'DRAFT',
+    outline: 'OUTLINE_GENERATED',
+    descriptions: 'DESCRIPTIONS_GENERATED',
+    images: 'COMPLETED',
+  } as const
+
+  const now = new Date().toISOString()
+  const pages = stage === 'draft'
+    ? []
+    : MOCK_PAGE_TITLES.map((title, index) => ({
+        page_id: `mock-page-${index + 1}`,
+        order_index: index,
+        outline_content: {
+          title,
+          points: [`${title} 要点 1`, `${title} 要点 2`],
+        },
+        description_content: (
+          stage === 'descriptions' || stage === 'images'
+            ? {
+                text: `${title} 的页面描述`,
+                extra_fields: { 排版布局: index === 0 ? '居中布局' : '左右分栏' },
+              }
+            : undefined
+        ),
+        generated_image_url: (
+          stage === 'images'
+            ? `/files/${MOCK_PROJECT_ID}/pages/mock-page-${index + 1}.png`
+            : undefined
+        ),
+        status: stage === 'images'
+          ? 'COMPLETED'
+          : stage === 'descriptions'
+            ? 'DESCRIPTION_GENERATED'
+            : 'DRAFT',
+        created_at: now,
+        updated_at: now,
+      }))
+
+  return {
+    project_id: MOCK_PROJECT_ID,
+    idea_prompt: '创建一份关于人工智能基础的简短PPT',
+    creation_type: 'idea',
+    template_style: 'default',
+    image_aspect_ratio: '16:9',
+    status: statusByStage[stage],
+    pages,
+    created_at: now,
+    updated_at: now,
+  }
+}
+
 test.describe('UI-driven E2E test (Mocked Backend)', () => {
   test.setTimeout(2 * 60 * 1000) // 2 minutes max
   
@@ -24,19 +85,66 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     console.log('🌐 Starting UI-driven E2E test (Mocked Backend)')
     console.log('========================================\n')
     
+    await page.addInitScript(() => {
+      localStorage.removeItem('auth-storage')
+      localStorage.setItem('hasSeenHelpModal', 'true')
+    })
+
+    let mockStage: MockStage = 'draft'
+
+    await page.route('**/api/access-code/check', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { enabled: false } }),
+      })
+    })
+
+    await page.route('**/api/settings', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { description_generation_mode: 'parallel' },
+        }),
+      })
+    })
+
+    await page.route('**/api/output-language', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { language: 'zh' } }),
+      })
+    })
+
     // Mock API responses
     await page.route('**/api/projects', async (route) => {
-      if (route.request().method() === 'POST') {
+      const method = route.request().method()
+      if (method === 'POST') {
         await route.fulfill({
           status: 201,
           contentType: 'application/json',
           body: JSON.stringify({
             success: true,
             data: {
-              project_id: 'mock-project-123',
+              project_id: MOCK_PROJECT_ID,
               status: 'DRAFT'
             }
           })
+        })
+      } else if (method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              projects: [],
+              total: 0,
+            },
+          }),
         })
       } else {
         await route.continue()
@@ -44,41 +152,78 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     })
     
     // Mock outline generation
+    await page.route('**/api/projects/*/generate/outline/stream', async (route) => {
+      mockStage = 'outline'
+      const project = buildMockProject(mockStage)
+      const sseEvents = project.pages.map((mockPage, index) => (
+        `event: page\ndata: ${JSON.stringify({
+          index,
+          title: mockPage.outline_content.title,
+          points: mockPage.outline_content.points,
+        })}\n\n`
+      ))
+      const doneEvent = `event: done\ndata: ${JSON.stringify({
+        total: project.pages.length,
+        pages: project.pages,
+        complete: true,
+      })}\n\n`
+
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+        body: sseEvents.join('') + doneEvent,
+      })
+    })
+
     await page.route('**/api/projects/*/generate/outline', async (route) => {
+      mockStage = 'outline'
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          data: { task_id: 'mock-outline-task' }
+          data: { pages: buildMockProject(mockStage).pages }
         })
       })
     })
     
-    // Mock project status (outline generated)
-    await page.route('**/api/projects/mock-project-123', async (route) => {
+    await page.route(`**/api/projects/${MOCK_PROJECT_ID}`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          data: {
-            project_id: 'mock-project-123',
-            status: 'OUTLINE_GENERATED',
-            outline_content: {
-              pages: [
-                { title: '什么是AI', order_index: 0 },
-                { title: 'AI的应用', order_index: 1 },
-                { title: 'AI的未来', order_index: 2 }
-              ]
-            }
-          }
+          data: buildMockProject(mockStage),
         })
       })
     })
     
     // Mock description generation
+    await page.route('**/api/projects/*/generate/descriptions/stream', async (route) => {
+      mockStage = 'descriptions'
+      const project = buildMockProject(mockStage)
+      const body = `event: done\ndata: ${JSON.stringify({
+        total: project.pages.length,
+        pages: project.pages,
+      })}\n\n`
+
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+        body,
+      })
+    })
+
     await page.route('**/api/projects/*/generate/descriptions', async (route) => {
+      mockStage = 'descriptions'
       await route.fulfill({
         status: 202,  // 202 Accepted for async operations
         contentType: 'application/json',
@@ -91,6 +236,7 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     
     // Mock image generation
     await page.route('**/api/projects/*/generate/images', async (route) => {
+      mockStage = 'images'
       await route.fulfill({
         status: 202,  // 202 Accepted for async operations
         contentType: 'application/json',
@@ -100,11 +246,52 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
         })
       })
     })
+
+    await page.route('**/api/projects/*/tasks/*', async (route) => {
+      const taskId = route.request().url().split('/').pop() || 'mock-task'
+      const taskType = taskId.includes('image')
+        ? 'GENERATE_IMAGES'
+        : taskId.includes('desc')
+          ? 'GENERATE_DESCRIPTIONS'
+          : 'UNKNOWN'
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            task_id: taskId,
+            task_type: taskType,
+            status: 'COMPLETED',
+            progress: {
+              total: MOCK_PAGE_TITLES.length,
+              completed: MOCK_PAGE_TITLES.length,
+              failed: 0,
+            },
+          },
+        }),
+      })
+    })
+
+    await page.route(`**/files/${MOCK_PROJECT_ID}/**`, async (route) => {
+      const fixturePath = path.join(FRONTEND_DIR, 'e2e', 'fixtures', 'slide_1.jpg')
+      if (!fs.existsSync(fixturePath)) {
+        await route.fulfill({ status: 404 })
+        return
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/jpeg',
+        body: fs.readFileSync(fixturePath),
+      })
+    })
     
     // Mock PPT export
     await page.route('**/api/projects/*/export/pptx**', async (route) => {
       // Create a minimal mock PPTX file
-      const mockPptxPath = path.join(__dirname, 'fixtures', 'mock-presentation.pptx')
+      const mockPptxPath = path.join(FRONTEND_DIR, 'e2e', 'fixtures', 'mock-presentation.pptx')
       
       if (fs.existsSync(mockPptxPath)) {
         const buffer = fs.readFileSync(mockPptxPath)
@@ -144,15 +331,16 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     await page.click('button:has-text("一句话生成")').catch(() => {
       // If click fails, the tab might already be selected, which is fine
     })
-    await page.waitForSelector('textarea, input[type="text"]', { timeout: 10000 })
+    await page.waitForSelector('[role="textbox"], textarea, input[type="text"]', { timeout: 10000 })
     console.log('✓ Create form displayed\n')
     
     // ====================================
     // Step 3: Enter idea and click "Next"
     // ====================================
     console.log('✍️  Step 3: Entering idea content...')
-    const ideaInput = page.locator('textarea, input[type="text"]').first()
-    await ideaInput.fill('创建一份关于人工智能基础的简短PPT，包含3页：什么是AI、AI的应用、AI的未来')
+    const ideaInput = page.locator('[role="textbox"], textarea, input[type="text"]').first()
+    await ideaInput.click()
+    await ideaInput.pressSequentially('创建一份关于人工智能基础的简短PPT，包含3页：什么是AI、AI的应用、AI的未来')
     
     console.log('🚀 Clicking "Next" button...')
     await page.click('button:has-text("下一步")')
@@ -183,9 +371,7 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     // Step 6: Verify UI shows outline (mocked data)
     // ====================================
     console.log('✅ Step 6: Verifying UI shows outline items...')
-    // The UI should show the mocked outline data
-    await expect(page.locator('.outline-card, [data-testid="outline-item"], .outline-section').first())
-      .toBeVisible({ timeout: 10000 })
+    await expect(page.locator('text=/第 \\d+ 页/').first()).toBeVisible({ timeout: 10000 })
     console.log('✓ Outline items visible in UI\n')
     
     // ====================================
@@ -213,12 +399,10 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     // Step 9: Navigate to image generation
     // ====================================
     console.log('➡️  Step 9: Navigating to image generation page...')
-    const nextBtn2 = page.locator('button:has-text("下一步")')
-    if (await nextBtn2.count() > 0) {
-      await nextBtn2.first().click()
-      await page.waitForTimeout(1000)
-      console.log('✓ Navigated to image generation page\n')
-    }
+    const generateImagesNavBtn = page.locator('button:has-text("生成图片")').first()
+    await generateImagesNavBtn.click()
+    await page.waitForURL(/\/project\/.*\/preview/, { timeout: 10000 })
+    console.log('✓ Navigated to image generation page\n')
     
     // ====================================
     // Step 10: Test image generation UI (mocked)
@@ -266,4 +450,3 @@ test.describe('UI-driven E2E test (Mocked Backend)', () => {
     })
   })
 })
-

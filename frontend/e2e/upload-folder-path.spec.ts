@@ -19,7 +19,7 @@ import * as path from 'path'
 const FRONTEND_DIR = process.cwd().endsWith('frontend')
   ? process.cwd()
   : path.join(process.cwd(), 'frontend')
-const PROJECT_ROOT = path.resolve(FRONTEND_DIR, '..')
+const _PROJECT_ROOT = path.resolve(FRONTEND_DIR, '..')
 const FIXTURES = path.join(FRONTEND_DIR, 'e2e', 'fixtures')
 const BACKEND_LOG = '/tmp/fix-upload-backend.log'
 
@@ -27,6 +27,9 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
   test('material image referenced in description is resolved correctly during image generation', async ({
     request,
   }) => {
+    let sessionCookie: string | undefined
+    const headers = () => (sessionCookie ? { Cookie: sessionCookie } : undefined)
+
     // 1. Create a project
     const createResp = await request.post('/api/projects', {
       data: {
@@ -34,10 +37,15 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
         idea_prompt: 'upload folder path test',
         template_style: 'default',
       },
+      headers: headers(),
     })
     if (!createResp.ok()) {
       test.skip(true, 'Backend unavailable')
       return
+    }
+    const setCookie = createResp.headers()['set-cookie']
+    if (setCookie) {
+      sessionCookie = setCookie.split(';', 1)[0]
     }
     const projectId = (await createResp.json()).data?.project_id
     expect(projectId).toBeTruthy()
@@ -45,6 +53,7 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
     // 2. Create a page
     const pageResp = await request.post(`/api/projects/${projectId}/pages`, {
       data: { order_index: 0, outline_content: { title: 'Test Slide' } },
+      headers: headers(),
     })
     expect(pageResp.ok()).toBe(true)
     const pageId = (await pageResp.json()).data?.page_id
@@ -61,7 +70,10 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
 
     const uploadResp = await request.post(
       `/api/projects/${projectId}/materials/upload`,
-      { multipart: { file: { name: 'test-material.jpg', mimeType: 'image/jpeg', buffer: fileBuffer } } },
+      {
+        multipart: { file: { name: 'test-material.jpg', mimeType: 'image/jpeg', buffer: fileBuffer } },
+        headers: headers(),
+      },
     )
     expect(uploadResp.ok()).toBe(true)
     const materialData = (await uploadResp.json()).data
@@ -74,7 +86,7 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
       : `/files/${materialPath}`
 
     // 4. Verify the material file is accessible via /files/ endpoint
-    const fileResp = await request.get(filesUrl)
+    const fileResp = await request.get(filesUrl, { headers: headers() })
     expect(fileResp.ok()).toBe(true)
 
     // 5. Set page description with material reference
@@ -89,6 +101,7 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
             layout_suggestion: 'full-image',
           },
         },
+        headers: headers(),
       },
     )
     expect(descResp.ok()).toBe(true)
@@ -101,7 +114,7 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
     // 7. Trigger image generation (will fail at AI provider level — expected)
     const genResp = await request.post(
       `/api/projects/${projectId}/generate/images`,
-      { data: { max_workers: 1 } },
+      { data: { max_workers: 1 }, headers: headers() },
     )
     expect(genResp.ok()).toBe(true)
     const taskId = (await genResp.json()).data?.task_id
@@ -113,6 +126,7 @@ test.describe('UPLOAD_FOLDER path resolution (#287)', () => {
       await new Promise((r) => setTimeout(r, 1000))
       const taskResp = await request.get(
         `/api/projects/${projectId}/tasks/${taskId}`,
+        { headers: headers() },
       )
       if (!taskResp.ok()) continue
       const task = (await taskResp.json()).data

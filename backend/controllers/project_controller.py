@@ -31,7 +31,7 @@ from utils import (
     success_response, error_response, not_found, bad_request,
     parse_page_ids_from_body, get_filtered_pages
 )
-from utils.decorators import optional_auth, login_required
+from utils.decorators import optional_auth
 
 logger = logging.getLogger(__name__)
 
@@ -1038,7 +1038,7 @@ def generate_descriptions_stream(project_id):
 
 
 @project_bp.route('/<project_id>/generate/images', methods=['POST'])
-@login_required
+@optional_auth
 def generate_images(project_id):
     """
     POST /api/projects/{project_id}/generate/images - Generate images
@@ -1071,11 +1071,12 @@ def generate_images(project_id):
         if not pages:
             return bad_request("No pages found for project")
 
+        current_user = getattr(g, 'current_user', None)
         required_credits = len(pages) * CreditService.COST_PER_IMAGE
-        if not CreditService.check_credits(g.current_user, required_credits):
+        if current_user and not CreditService.check_credits(current_user, required_credits):
             return error_response(
                 'INSUFFICIENT_CREDITS',
-                f'Insufficient credits. Required: {required_credits} (for {len(pages)} images), Available: {g.current_user.credits}',
+                f'Insufficient credits. Required: {required_credits} (for {len(pages)} images), Available: {current_user.credits}',
                 402,
             )
         
@@ -1147,7 +1148,7 @@ def generate_images(project_id):
             combined_requirements if combined_requirements.strip() else None,
             language,
             selected_page_ids if selected_page_ids else None,
-            user_id=g.current_user.id,
+            user_id=current_user.id if current_user else None,
         )
         
         # Update project status

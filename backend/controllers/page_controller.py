@@ -9,7 +9,7 @@ from services import FileService, ProjectContext
 from services.ai_service_manager import get_ai_service
 from services.credit_service import CreditService
 from services.task_manager import task_manager, generate_single_page_image_task, edit_page_image_task
-from utils.decorators import optional_auth, login_required
+from utils.decorators import optional_auth
 from datetime import datetime
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -336,7 +336,7 @@ def generate_page_description(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/generate/image', methods=['POST'])
-@login_required
+@optional_auth
 def generate_page_image(project_id, page_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/generate/image - Generate single page image
@@ -348,10 +348,11 @@ def generate_page_image(project_id, page_id):
     }
     """
     try:
-        if not CreditService.check_credits(g.current_user):
+        current_user = getattr(g, 'current_user', None)
+        if current_user and not CreditService.check_credits(current_user):
             return error_response(
                 'INSUFFICIENT_CREDITS',
-                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {g.current_user.credits}',
+                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {current_user.credits}',
                 402,
             )
 
@@ -501,7 +502,7 @@ def generate_page_image(project_id, page_id):
             app,
             combined_requirements if combined_requirements.strip() else None,
             language,
-            user_id=g.current_user.id,
+            user_id=current_user.id if current_user else None,
         )
         
         # Return task_id immediately
@@ -517,7 +518,7 @@ def generate_page_image(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/edit/image', methods=['POST'])
-@login_required
+@optional_auth
 def edit_page_image(project_id, page_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/edit/image - Edit page image
@@ -539,10 +540,11 @@ def edit_page_image(project_id, page_id):
     - context_images: file uploads (multiple files with key "context_images")
     """
     try:
-        if not CreditService.check_credits(g.current_user):
+        current_user = getattr(g, 'current_user', None)
+        if current_user and not CreditService.check_credits(current_user):
             return error_response(
                 'INSUFFICIENT_CREDITS',
-                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {g.current_user.credits}',
+                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {current_user.credits}',
                 402,
             )
 
@@ -678,7 +680,7 @@ def edit_page_image(project_id, page_id):
             additional_ref_images if additional_ref_images else None,
             str(temp_dir) if temp_dir else None,
             app,
-            user_id=g.current_user.id,
+            user_id=current_user.id if current_user else None,
         )
         
         # Return task_id immediately

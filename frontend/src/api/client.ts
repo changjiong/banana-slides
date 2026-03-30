@@ -85,6 +85,11 @@ apiClient.interceptors.response.use(
       !originalRequest?._retry &&
       !originalRequest?.url?.includes('/api/auth/refresh')
     ) {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (!authStorage) {
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -97,11 +102,6 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const authStorage = localStorage.getItem('auth-storage');
-        if (!authStorage) {
-          throw new Error('No auth storage');
-        }
-
         const { state } = JSON.parse(authStorage);
         if (!state?.refreshToken) {
           throw new Error('No refresh token');
