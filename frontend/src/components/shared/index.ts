@@ -27,5 +27,6 @@ export { HelpModal } from './HelpModal';
 export { ProjectSettingsModal } from './ProjectSettingsModal';
 export { ExportTasksPanel } from './ExportTasksPanel';
 export { AccessCodeGuard } from './AccessCodeGuard';
+export { GithubLink } from './GithubLink';
 export { TextStyleSelector } from './TextStyleSelector';
 export { Pagination } from './Pagination';

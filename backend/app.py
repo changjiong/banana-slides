@@ -20,11 +20,14 @@ load_dotenv(dotenv_path=_env_file, override=True)
 
 from flask import Flask
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 from models import db
 from config import Config
 from controllers.material_controller import material_bp, material_global_bp
 from controllers.reference_file_controller import reference_file_bp
+from controllers.auth_controller import auth_bp, init_oauth
 from controllers.settings_controller import settings_bp
+from controllers.user_controller import user_bp
 from controllers import project_bp, page_bp, template_bp, user_template_bp, export_bp, file_bp, style_bp
 
 
@@ -56,13 +59,18 @@ def create_app():
     # Load configuration from Config class
     app.config.from_object(Config)
     
-    # Override with environment-specific paths (use absolute path)
+    # Override with environment-specific paths (use absolute path).
+    # Tests inject DATABASE_URL and should not be forced onto the repo-local instance DB.
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    instance_dir = os.path.join(backend_dir, 'instance')
-    os.makedirs(instance_dir, exist_ok=True)
-    
-    db_path = os.path.join(instance_dir, 'database.db')
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    else:
+        instance_dir = os.path.join(backend_dir, 'instance')
+        os.makedirs(instance_dir, exist_ok=True)
+
+        db_path = os.path.join(instance_dir, 'database.db')
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
     
     # Ensure upload folder exists
     project_root = os.path.dirname(backend_dir)
@@ -99,8 +107,16 @@ def create_app():
     CORS(app, origins=cors_origins)
     # Database migrations (Alembic via Flask-Migrate)
     Migrate(app, db)
+
+    # Initialize JWT
+    JWTManager(app)
+
+    # Initialize OAuth
+    init_oauth(app)
     
     # Register blueprints
+    app.register_blueprint(auth_bp)  # /api/auth
+    app.register_blueprint(user_bp)  # /api/user
     app.register_blueprint(project_bp)
     app.register_blueprint(page_bp)
     app.register_blueprint(template_bp)

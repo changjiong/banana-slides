@@ -1,11 +1,13 @@
 """
 Material Controller - handles standalone material image generation
 """
-from flask import Blueprint, request, current_app, send_file
+from flask import Blueprint, request, current_app, send_file, g
 from models import db, Project, Material, Task
 from utils import success_response, error_response, not_found, bad_request
+from utils.decorators import login_required
 from services import FileService
 from services.ai_service_manager import get_ai_service
+from services.credit_service import CreditService
 from services.task_manager import task_manager, generate_material_image_task
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -229,6 +231,7 @@ def _save_material_file(file, target_project_id: Optional[str]):
 
 
 @material_bp.route('/<project_id>/materials/generate', methods=['POST'])
+@login_required
 def generate_material_image(project_id):
     """
     POST /api/projects/{project_id}/materials/generate - Generate a standalone material image
@@ -241,6 +244,13 @@ def generate_material_image(project_id):
     Note: project_id can be 'none' to generate global materials (not associated with any project)
     """
     try:
+        if not CreditService.check_credits(g.current_user):
+            return error_response(
+                'INSUFFICIENT_CREDITS',
+                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {g.current_user.credits}',
+                402,
+            )
+
         # 支持 'none' 作为特殊值，表示生成全局素材
         if project_id != 'none':
             project = Project.query.get(project_id)
@@ -338,7 +348,8 @@ def generate_material_image(project_id):
                 aspect_ratio or (project.image_aspect_ratio if project else None) or current_app.config.get('DEFAULT_ASPECT_RATIO', '16:9'),
                 current_app.config['DEFAULT_RESOLUTION'],
                 temp_dir_str,
-                app
+                app,
+                user_id=g.current_user.id,
             )
 
             # Return task_id immediately (不再清理temp_dir，由后台任务清理)
@@ -560,4 +571,3 @@ def download_materials_zip():
         tmp.close()
         current_app.logger.exception("Failed to build materials zip")
         return error_response('SERVER_ERROR', 'Failed to create zip archive', 500)
-

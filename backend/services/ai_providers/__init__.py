@@ -68,11 +68,34 @@ def _resolve_setting(key: str, fallback: Optional[str] = None) -> Optional[str]:
     """Look up a configuration value using the standard priority chain.
 
     Resolution order:
-        1. Flask ``app.config`` (populated from the database Settings page)
-        2. OS environment variable
-        3. *fallback* argument (may be ``None``)
+        1. User-specific settings (when supported and a user is authenticated)
+        2. Flask ``app.config`` (populated from the database Settings page)
+        3. OS environment variable
+        4. *fallback* argument (may be ``None``)
     """
-    # 1) Try Flask app.config
+    # 1) Try authenticated user settings for supported keys
+    try:
+        from services.config_service import config_service
+
+        user_setting_getters = {
+            'GOOGLE_API_KEY': config_service.get_google_api_key,
+            'GOOGLE_API_BASE': config_service.get_google_api_base,
+            'MINERU_TOKEN': config_service.get_mineru_token,
+            'MINERU_API_BASE': config_service.get_mineru_api_base,
+            'IMAGE_CAPTION_MODEL': config_service.get_image_caption_model,
+        }
+
+        getter = user_setting_getters.get(key)
+        if getter:
+            val = getter()
+            if val is not None and val != '':
+                logger.debug("Setting %s resolved from user settings", key)
+                return str(val)
+    except Exception:
+        # Ignore request-context/decryption issues and fall back to standard resolution.
+        pass
+
+    # 2) Try Flask app.config
     try:
         from flask import current_app
         if current_app and hasattr(current_app, 'config') and key in current_app.config:
@@ -83,13 +106,13 @@ def _resolve_setting(key: str, fallback: Optional[str] = None) -> Optional[str]:
     except RuntimeError:
         pass  # outside Flask request context
 
-    # 2) Try environment
+    # 3) Try environment
     env_val = os.getenv(key)
     if env_val is not None:
         logger.debug("Setting %s resolved from environment", key)
         return env_val
 
-    # 3) Fallback
+    # 4) Fallback
     if fallback is not None:
         logger.debug("Setting %s using fallback: %s", key, fallback)
     return fallback

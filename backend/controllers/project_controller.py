@@ -6,10 +6,11 @@ import logging
 import os
 import subprocess
 import traceback
+import uuid
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, request, jsonify, current_app, Response, stream_with_context
+from flask import Blueprint, request, jsonify, current_app, Response, stream_with_context, g, make_response
 from sqlalchemy import desc
 from utils.validators import normalize_aspect_ratio
 from sqlalchemy.orm import joinedload
@@ -18,6 +19,7 @@ from werkzeug.utils import secure_filename
 
 from models import db, Project, Page, Task, ReferenceFile
 from services import ProjectContext, FileService
+from services.credit_service import CreditService
 from services.ai_service_manager import get_ai_service
 from services.task_manager import (
     task_manager,
@@ -29,6 +31,7 @@ from utils import (
     success_response, error_response, not_found, bad_request,
     parse_page_ids_from_body, get_filtered_pages
 )
+from utils.decorators import optional_auth, login_required
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +156,65 @@ def _smart_merge_pages(project_id, pages_data):
     return pages_list
 
 
+def _get_request_ownership():
+    """Resolve the current request owner identity, creating a guest session when needed."""
+    if getattr(g, 'current_user', None):
+        return g.current_user.id, None, None
+
+    session_id = request.cookies.get('guest_session_id')
+    new_session_id = None
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        new_session_id = session_id
+
+    return None, session_id, new_session_id
+
+
+def _set_guest_session_cookie(response, guest_session_id: str | None):
+    """Attach the guest session cookie when a new guest session is created."""
+    if not guest_session_id:
+        return response
+
+    response.set_cookie(
+        'guest_session_id',
+        guest_session_id,
+        max_age=30 * 24 * 60 * 60,
+        httponly=True,
+        samesite='Lax',
+        secure=request.is_secure,
+    )
+    return response
+
+
+def _check_project_access(project: Project) -> bool:
+    """Return True when the current authenticated user or guest session owns the project."""
+    current_user = getattr(g, 'current_user', None)
+    guest_session_id = request.cookies.get('guest_session_id')
+
+    if current_user:
+        if current_user.role == 'admin':
+            return True
+        if project.user_id == current_user.id:
+            return True
+        if project.user_id is None and guest_session_id and project.session_id == guest_session_id:
+            return True
+        return False
+
+    return bool(guest_session_id and project.session_id == guest_session_id)
+
+
+def _get_owned_project(project_id: str):
+    """Load a project and enforce owner/session access."""
+    project = Project.query.options(joinedload(Project.pages)).filter(Project.id == project_id).first()
+    if not project:
+        return None, not_found('Project')
+    if not _check_project_access(project):
+        return None, error_response('FORBIDDEN', 'You do not have access to this project', 403)
+    return project, None
+
+
 @project_bp.route('', methods=['GET'])
+@optional_auth
 def list_projects():
     """
     GET /api/projects - Get all projects (for history)
@@ -171,15 +232,25 @@ def list_projects():
         limit = min(max(1, limit), 100)  # Between 1-100
         offset = max(0, offset)  # Non-negative
 
-        # Get total count for pagination
-        total = Project.query.count()
+        query = Project.query.options(joinedload(Project.pages))
+        current_user = getattr(g, 'current_user', None)
+        guest_session_id = request.cookies.get('guest_session_id')
 
-        projects = Project.query\
-            .options(joinedload(Project.pages))\
-            .order_by(desc(Project.updated_at))\
-            .limit(limit)\
-            .offset(offset)\
-            .all()
+        if current_user:
+            if current_user.role != 'admin':
+                query = query.filter(Project.user_id == current_user.id)
+        else:
+            if not guest_session_id:
+                return success_response({
+                    'projects': [],
+                    'total': 0,
+                    'limit': limit,
+                    'offset': offset,
+                })
+            query = query.filter(Project.session_id == guest_session_id)
+
+        total = query.count()
+        projects = query.order_by(desc(Project.updated_at)).limit(limit).offset(offset).all()
 
         return success_response({
             'projects': [project.to_dict(include_pages=True) for project in projects],
@@ -194,6 +265,7 @@ def list_projects():
 
 
 @project_bp.route('', methods=['POST'])
+@optional_auth
 def create_project():
     """
     POST /api/projects - Create a new project
@@ -230,6 +302,8 @@ def create_project():
             except ValueError as e:
                 return bad_request(str(e))
 
+        user_id, session_id, new_session_id = _get_request_ownership()
+
         # Create project
         project = Project(
             creation_type=creation_type,
@@ -238,17 +312,20 @@ def create_project():
             description_text=data.get('description_text'),
             template_style=data.get('template_style'),
             image_aspect_ratio=image_aspect_ratio,
+            user_id=user_id,
+            session_id=session_id,
             status='DRAFT'
         )
         
         db.session.add(project)
         db.session.commit()
         
-        return success_response({
+        response = make_response(success_response({
             'project_id': project.id,
             'status': project.status,
             'pages': []
-        }, status_code=201)
+        }, status_code=201))
+        return _set_guest_session_cookie(response, new_session_id)
     
     except BadRequest as e:
         # Handle JSON parsing errors (invalid JSON body)
@@ -264,19 +341,15 @@ def create_project():
 
 
 @project_bp.route('/<project_id>', methods=['GET'])
+@optional_auth
 def get_project(project_id):
     """
     GET /api/projects/{project_id} - Get project details
     """
     try:
-        # Use eager loading to load project and related pages
-        project = Project.query\
-            .options(joinedload(Project.pages))\
-            .filter(Project.id == project_id)\
-            .first()
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         return success_response(project.to_dict(include_pages=True))
     
@@ -286,6 +359,7 @@ def get_project(project_id):
 
 
 @project_bp.route('/<project_id>', methods=['PUT'])
+@optional_auth
 def update_project(project_id):
     """
     PUT /api/projects/{project_id} - Update project
@@ -297,14 +371,9 @@ def update_project(project_id):
     }
     """
     try:
-        # Use eager loading to load project and pages (for page order updates)
-        project = Project.query\
-            .options(joinedload(Project.pages))\
-            .filter(Project.id == project_id)\
-            .first()
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         data = request.get_json()
         
@@ -376,15 +445,15 @@ def update_project(project_id):
 
 
 @project_bp.route('/<project_id>', methods=['DELETE'])
+@optional_auth
 def delete_project(project_id):
     """
     DELETE /api/projects/{project_id} - Delete project
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         # Delete project files
         from services import FileService
@@ -404,6 +473,7 @@ def delete_project(project_id):
 
 
 @project_bp.route('/<project_id>/generate/outline', methods=['POST'])
+@optional_auth
 def generate_outline(project_id):
     """
     POST /api/projects/{project_id}/generate/outline - Generate outline
@@ -419,10 +489,9 @@ def generate_outline(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         # Get singleton AI service instance
         ai_service = get_ai_service()
@@ -496,6 +565,7 @@ def generate_outline(project_id):
 
 
 @project_bp.route('/<project_id>/generate/outline/stream', methods=['POST'])
+@optional_auth
 def generate_outline_stream(project_id):
     """
     POST /api/projects/{project_id}/generate/outline/stream - Stream outline generation via SSE
@@ -509,9 +579,9 @@ def generate_outline_stream(project_id):
       event: error   — error occurred {message}
     """
     # Validate project exists before entering the generator
-    project = Project.query.get(project_id)
-    if not project:
-        return not_found('Project')
+    project, error = _get_owned_project(project_id)
+    if error:
+        return error
 
     data = request.get_json() or {}
     language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
@@ -615,6 +685,7 @@ def _sse_event(event: str, data: dict) -> str:
 
 
 @project_bp.route('/<project_id>/generate/from-description', methods=['POST'])
+@optional_auth
 def generate_from_description(project_id):
     """
     POST /api/projects/{project_id}/generate/from-description - Generate outline and page descriptions from description text
@@ -633,10 +704,9 @@ def generate_from_description(project_id):
     """
     
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         if project.creation_type != 'descriptions':
             return bad_request("This endpoint is only for descriptions type projects")
@@ -732,6 +802,7 @@ def generate_from_description(project_id):
 
 
 @project_bp.route('/<project_id>/generate/descriptions', methods=['POST'])
+@optional_auth
 def generate_descriptions(project_id):
     """
     POST /api/projects/{project_id}/generate/descriptions - Generate descriptions
@@ -743,10 +814,9 @@ def generate_descriptions(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         if not project.pages:
             return bad_request("Project must have outline generated first")
@@ -825,6 +895,7 @@ def generate_descriptions(project_id):
 
 
 @project_bp.route('/<project_id>/generate/descriptions/stream', methods=['POST'])
+@optional_auth
 def generate_descriptions_stream(project_id):
     """
     POST /api/projects/{project_id}/generate/descriptions/stream - Stream description generation via SSE
@@ -836,9 +907,9 @@ def generate_descriptions_stream(project_id):
       event: done        — {total, pages: [...]}
       event: error       — {message}
     """
-    project = Project.query.get(project_id)
-    if not project:
-        return not_found('Project')
+    project, error = _get_owned_project(project_id)
+    if error:
+        return error
 
     if not project.pages:
         return bad_request("Project must have outline generated first")
@@ -967,6 +1038,7 @@ def generate_descriptions_stream(project_id):
 
 
 @project_bp.route('/<project_id>/generate/images', methods=['POST'])
+@login_required
 def generate_images(project_id):
     """
     POST /api/projects/{project_id}/generate/images - Generate images
@@ -980,10 +1052,9 @@ def generate_images(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         # if project.status not in ['DESCRIPTIONS_GENERATED', 'OUTLINE_GENERATED']:
         #     return bad_request("Project must have descriptions generated first")
@@ -999,6 +1070,14 @@ def generate_images(project_id):
         
         if not pages:
             return bad_request("No pages found for project")
+
+        required_credits = len(pages) * CreditService.COST_PER_IMAGE
+        if not CreditService.check_credits(g.current_user, required_credits):
+            return error_response(
+                'INSUFFICIENT_CREDITS',
+                f'Insufficient credits. Required: {required_credits} (for {len(pages)} images), Available: {g.current_user.credits}',
+                402,
+            )
         
         # 检查是否有模板图片或风格描述
         from services import FileService
@@ -1067,7 +1146,8 @@ def generate_images(project_id):
             app,
             combined_requirements if combined_requirements.strip() else None,
             language,
-            selected_page_ids if selected_page_ids else None
+            selected_page_ids if selected_page_ids else None,
+            user_id=g.current_user.id,
         )
         
         # Update project status
@@ -1087,11 +1167,16 @@ def generate_images(project_id):
 
 
 @project_bp.route('/<project_id>/tasks/<task_id>', methods=['GET'])
+@optional_auth
 def get_task_status(project_id, task_id):
     """
     GET /api/projects/{project_id}/tasks/{task_id} - Get task status
     """
     try:
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
+
         task = Task.query.get(task_id)
         
         if not task or task.project_id != project_id:
@@ -1105,6 +1190,7 @@ def get_task_status(project_id, task_id):
 
 
 @project_bp.route('/<project_id>/refine/outline', methods=['POST'])
+@optional_auth
 def refine_outline(project_id):
     """
     POST /api/projects/{project_id}/refine/outline - Refine outline based on user requirements
@@ -1116,10 +1202,9 @@ def refine_outline(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         data = request.get_json()
         
@@ -1202,6 +1287,7 @@ def refine_outline(project_id):
 
 
 @project_bp.route('/<project_id>/refine/descriptions', methods=['POST'])
+@optional_auth
 def refine_descriptions(project_id):
     """
     POST /api/projects/{project_id}/refine/descriptions - Refine page descriptions based on user requirements
@@ -1213,10 +1299,9 @@ def refine_descriptions(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         data = request.get_json()
         
@@ -1326,6 +1411,7 @@ def refine_descriptions(project_id):
 
 
 @project_bp.route('/renovation', methods=['POST'])
+@optional_auth
 def create_ppt_renovation_project():
     """
     POST /api/projects/renovation - Create a PPT renovation project
@@ -1359,10 +1445,14 @@ def create_ppt_renovation_project():
         keep_layout = request.form.get('keep_layout', 'false').lower() == 'true'
         template_style = request.form.get('template_style', '').strip() or None
 
+        user_id, session_id, new_session_id = _get_request_ownership()
+
         # Create project
         project = Project(
             creation_type='ppt_renovation',
             template_style=template_style,
+            user_id=user_id,
+            session_id=session_id,
             status='DRAFT'
         )
         db.session.add(project)
@@ -1545,11 +1635,12 @@ def create_ppt_renovation_project():
         project.status = 'PROCESSING'
         db.session.commit()
 
-        return success_response({
+        response = make_response(success_response({
             'project_id': project_id,
             'task_id': task.id,
             'page_count': len(pages_list)
-        }, status_code=202)
+        }, status_code=202))
+        return _set_guest_session_cookie(response, new_session_id)
 
     except Exception as e:
         db.session.rollback()

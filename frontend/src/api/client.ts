@@ -15,8 +15,23 @@ apiClient.interceptors.request.use(
   (config) => {
     // Attach access code header for backend enforcement
     const accessCode = localStorage.getItem('banana-access-code');
-    if (accessCode && config.headers) {
+    if (accessCode) {
+      config.headers = config.headers || {};
       config.headers['X-Access-Code'] = accessCode;
+    }
+
+    // 自动注入 JWT token
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const { state } = JSON.parse(authStorage);
+        if (state?.accessToken) {
+          config.headers = config.headers || {};
+          config.headers['Authorization'] = `Bearer ${state.accessToken}`;
+        }
+      } catch {
+        // Ignore parse errors
+      }
     }
 
     // 如果请求体是 FormData，删除 Content-Type 让浏览器自动设置
@@ -38,12 +53,94 @@ apiClient.interceptors.request.use(
   }
 );
 
+// Token 刷新状态管理
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value?: unknown) => void;
+  reject: (reason?: unknown) => void;
+}> = [];
+
+const processQueue = (error: unknown = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve();
+    }
+  });
+  failedQueue = [];
+};
+
 // 响应拦截器
 apiClient.interceptors.response.use(
   (response) => {
     return response;
   },
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+
+    // 如果是 401 错误且不是刷新 token 的请求本身
+    if (
+      error.response?.status === 401 &&
+      !originalRequest?._retry &&
+      !originalRequest?.url?.includes('/api/auth/refresh')
+    ) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(() => apiClient(originalRequest))
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const authStorage = localStorage.getItem('auth-storage');
+        if (!authStorage) {
+          throw new Error('No auth storage');
+        }
+
+        const { state } = JSON.parse(authStorage);
+        if (!state?.refreshToken) {
+          throw new Error('No refresh token');
+        }
+
+        const response = await axios.post('/api/auth/refresh', null, {
+          headers: { Authorization: `Bearer ${state.refreshToken}` },
+        });
+
+        const newAccessToken = response.data.access_token;
+        const newState = {
+          ...state,
+          accessToken: newAccessToken,
+        };
+
+        localStorage.setItem(
+          'auth-storage',
+          JSON.stringify({ state: newState, version: 0 })
+        );
+
+        processQueue();
+        isRefreshing = false;
+
+        originalRequest.headers = originalRequest.headers || {};
+        originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
+        return apiClient(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError);
+        isRefreshing = false;
+        localStorage.removeItem('auth-storage');
+
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+
+        return Promise.reject(refreshError);
+      }
+    }
+
     // 统一错误处理
     if (error.response) {
       // 服务器返回错误状态码
@@ -82,4 +179,3 @@ export const getImageUrl = (path?: string, timestamp?: string | number): string 
 };
 
 export default apiClient;
-

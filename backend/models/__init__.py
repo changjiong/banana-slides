@@ -16,6 +16,9 @@ db = SQLAlchemy(
     }
 )
 
+from .user import User
+from .user_settings import UserSettings
+from .verification_code import VerificationCode
 from .project import Project
 from .page import Page
 from .task import Task
@@ -23,7 +26,21 @@ from .user_template import UserTemplate
 from .page_image_version import PageImageVersion
 from .material import Material
 from .reference_file import ReferenceFile
+from .credit_transaction import CreditTransaction
 from .settings import Settings
 
-__all__ = ['db', 'Project', 'Page', 'Task', 'UserTemplate', 'PageImageVersion', 'Material', 'ReferenceFile', 'Settings']
-
+__all__ = [
+    'db',
+    'User',
+    'UserSettings',
+    'VerificationCode',
+    'Project',
+    'Page',
+    'Task',
+    'UserTemplate',
+    'PageImageVersion',
+    'Material',
+    'ReferenceFile',
+    'CreditTransaction',
+    'Settings',
+]

@@ -2,12 +2,14 @@
 Page Controller - handles page-related endpoints
 """
 import logging
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, g
 from models import db, Project, Page, PageImageVersion, Task
 from utils import success_response, error_response, not_found, bad_request
 from services import FileService, ProjectContext
 from services.ai_service_manager import get_ai_service
+from services.credit_service import CreditService
 from services.task_manager import task_manager, generate_single_page_image_task, edit_page_image_task
+from utils.decorators import optional_auth, login_required
 from datetime import datetime
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -20,7 +22,31 @@ logger = logging.getLogger(__name__)
 page_bp = Blueprint('pages', __name__, url_prefix='/api/projects')
 
 
+def _get_owned_project(project_id: str):
+    from controllers.project_controller import _check_project_access
+
+    project = Project.query.get(project_id)
+    if not project:
+        return None, not_found('Project')
+    if not _check_project_access(project):
+        return None, error_response('FORBIDDEN', 'You do not have access to this project', 403)
+    return project, None
+
+
+def _get_owned_page(project_id: str, page_id: str):
+    project, error = _get_owned_project(project_id)
+    if error:
+        return None, None, error
+
+    page = Page.query.get(page_id)
+    if not page or page.project_id != project_id:
+        return project, None, not_found('Page')
+
+    return project, page, None
+
+
 @page_bp.route('/<project_id>/pages', methods=['POST'])
+@optional_auth
 def create_page(project_id):
     """
     POST /api/projects/{project_id}/pages - Add new page
@@ -33,10 +59,9 @@ def create_page(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
-        
-        if not project:
-            return not_found('Project')
+        project, error = _get_owned_project(project_id)
+        if error:
+            return error
         
         data = request.get_json()
         
@@ -81,15 +106,15 @@ def create_page(project_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>', methods=['DELETE'])
+@optional_auth
 def delete_page(project_id, page_id):
     """
     DELETE /api/projects/{project_id}/pages/{page_id} - Delete page
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
 
         # Delete page image if exists
         file_service = FileService(current_app.config['UPLOAD_FOLDER'])
@@ -99,9 +124,7 @@ def delete_page(project_id, page_id):
         db.session.delete(page)
 
         # Update project
-        project = Project.query.get(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.utcnow()
 
         db.session.commit()
 
@@ -113,6 +136,7 @@ def delete_page(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>', methods=['PUT'])
+@optional_auth
 def update_page(project_id, page_id):
     """
     PUT /api/projects/{project_id}/pages/{page_id} - Update page fields
@@ -123,10 +147,9 @@ def update_page(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
 
         data = request.get_json()
 
@@ -140,8 +163,7 @@ def update_page(project_id, page_id):
         page.updated_at = datetime.utcnow()
 
         # Update project
-        if page.project:
-            page.project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.utcnow()
 
         db.session.commit()
 
@@ -154,6 +176,7 @@ def update_page(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/outline', methods=['PUT'])
+@optional_auth
 def update_page_outline(project_id, page_id):
     """
     PUT /api/projects/{project_id}/pages/{page_id}/outline - Edit page outline
@@ -164,10 +187,9 @@ def update_page_outline(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         data = request.get_json()
         
@@ -178,9 +200,7 @@ def update_page_outline(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = Project.query.get(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.utcnow()
         
         db.session.commit()
         
@@ -192,6 +212,7 @@ def update_page_outline(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/description', methods=['PUT'])
+@optional_auth
 def update_page_description(project_id, page_id):
     """
     PUT /api/projects/{project_id}/pages/{page_id}/description - Edit description
@@ -206,10 +227,9 @@ def update_page_description(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         data = request.get_json()
         
@@ -220,9 +240,7 @@ def update_page_description(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = Project.query.get(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.utcnow()
         
         db.session.commit()
         
@@ -234,6 +252,7 @@ def update_page_description(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/generate/description', methods=['POST'])
+@optional_auth
 def generate_page_description(project_id, page_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/generate/description - Generate single page description
@@ -244,14 +263,9 @@ def generate_page_description(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
-        
-        project = Project.query.get(project_id)
-        if not project:
-            return not_found('Project')
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         data = request.get_json() or {}
         force_regenerate = data.get('force_regenerate', False)
@@ -322,6 +336,7 @@ def generate_page_description(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/generate/image', methods=['POST'])
+@login_required
 def generate_page_image(project_id, page_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/generate/image - Generate single page image
@@ -333,14 +348,16 @@ def generate_page_image(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
-        
-        project = Project.query.get(project_id)
-        if not project:
-            return not_found('Project')
+        if not CreditService.check_credits(g.current_user):
+            return error_response(
+                'INSUFFICIENT_CREDITS',
+                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {g.current_user.credits}',
+                402,
+            )
+
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         data = request.get_json() or {}
         use_template = data.get('use_template', True)
@@ -483,7 +500,8 @@ def generate_page_image(project_id, page_id):
             current_app.config['DEFAULT_RESOLUTION'],
             app,
             combined_requirements if combined_requirements.strip() else None,
-            language
+            language,
+            user_id=g.current_user.id,
         )
         
         # Return task_id immediately
@@ -499,6 +517,7 @@ def generate_page_image(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/edit/image', methods=['POST'])
+@login_required
 def edit_page_image(project_id, page_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/edit/image - Edit page image
@@ -520,17 +539,19 @@ def edit_page_image(project_id, page_id):
     - context_images: file uploads (multiple files with key "context_images")
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        if not CreditService.check_credits(g.current_user):
+            return error_response(
+                'INSUFFICIENT_CREDITS',
+                f'Insufficient credits. Required: {CreditService.COST_PER_IMAGE}, Available: {g.current_user.credits}',
+                402,
+            )
+
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         if not page.generated_image_path:
             return bad_request("Page must have generated image first")
-        
-        project = Project.query.get(project_id)
-        if not project:
-            return not_found('Project')
         
         # Initialize services
         ai_service = get_ai_service()
@@ -656,7 +677,8 @@ def edit_page_image(project_id, page_id):
             original_description,
             additional_ref_images if additional_ref_images else None,
             str(temp_dir) if temp_dir else None,
-            app
+            app,
+            user_id=g.current_user.id,
         )
         
         # Return task_id immediately
@@ -673,15 +695,15 @@ def edit_page_image(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/image-versions', methods=['GET'])
+@optional_auth
 def get_page_image_versions(project_id, page_id):
     """
     GET /api/projects/{project_id}/pages/{page_id}/image-versions - Get all image versions for a page
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        _project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         versions = PageImageVersion.query.filter_by(page_id=page_id)\
             .order_by(PageImageVersion.version_number.desc()).all()
@@ -695,16 +717,16 @@ def get_page_image_versions(project_id, page_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/image-versions/<version_id>/set-current', methods=['POST'])
+@optional_auth
 def set_current_image_version(project_id, page_id, version_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/image-versions/{version_id}/set-current
     Set a specific version as the current one
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
-            return not_found('Page')
+        _project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
         
         version = PageImageVersion.query.get(version_id)
         
@@ -739,6 +761,7 @@ def set_current_image_version(project_id, page_id, version_id):
 
 
 @page_bp.route('/<project_id>/pages/<page_id>/regenerate-renovation', methods=['POST'])
+@optional_auth
 def regenerate_renovation_page(project_id, page_id):
     """
     POST /api/projects/{project_id}/pages/{page_id}/regenerate-renovation
@@ -747,14 +770,9 @@ def regenerate_renovation_page(project_id, page_id):
     This re-runs the renovation pipeline for a single page.
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
-            return not_found('Page')
-
-        project = Project.query.get(project_id)
-        if not project:
-            return not_found('Project')
+        project, page, error = _get_owned_page(project_id, page_id)
+        if error:
+            return error
 
         # Verify this is a renovation project
         if project.creation_type != 'ppt_renovation':

@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useImagePaste } from '@/hooks/useImagePaste';
 import { useT } from '@/hooks/useT';
 import { ASPECT_RATIO_OPTIONS } from '@/config/aspectRatio';
+import { UserMenu } from '@/components/auth';
 
 type CreationType = 'idea' | 'outline' | 'description' | 'ppt_renovation';
 
@@ -740,6 +741,8 @@ export const Home: React.FC = () => {
               title={t('nav.help')}
             />
             {/* 分隔线 */}
+            <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
+            <UserMenu />
             <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
             {/* 语言切换按钮 */}
             <button

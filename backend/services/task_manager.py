@@ -326,7 +326,8 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                         resolution: str = "2K", app=None,
                         extra_requirements: str = None,
                         language: str = None,
-                        page_ids: list = None):
+                        page_ids: list = None,
+                        user_id: str = None):
     """
     Background task for generating page images
     Based on demo.py gen_images_parallel()
@@ -505,6 +506,21 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                             completed += 1
                             # 刷新页面对象以获取最新状态
                             db.session.refresh(page)
+
+                            if user_id:
+                                from models import User
+                                from services.credit_service import CreditService
+
+                                user = User.query.get(user_id)
+                                if user and user.role != 'admin':
+                                    CreditService.deduct_credits(
+                                        user,
+                                        CreditService.COST_PER_IMAGE,
+                                        'IMAGE_GENERATION',
+                                        f'Batch image generation - page {page_id}',
+                                        page_id,
+                                    )
+                                    db.session.commit()
                     
                     # Update task progress
                     task = Task.query.get(task_id)
@@ -552,7 +568,8 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                                     use_template: bool = True, aspect_ratio: str = "16:9",
                                     resolution: str = "2K", app=None,
                                     extra_requirements: str = None,
-                                    language: str = None):
+                                    language: str = None,
+                                    user_id: str = None):
     """
     Background task for generating a single page image
     
@@ -653,6 +670,21 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                 "failed": 0
             })
             db.session.commit()
+
+            if user_id:
+                from models import User
+                from services.credit_service import CreditService
+
+                user = User.query.get(user_id)
+                if user and user.role != 'admin':
+                    CreditService.deduct_credits(
+                        user,
+                        CreditService.COST_PER_IMAGE,
+                        'IMAGE_GENERATION',
+                        f'Single page image generation - page {page_id}',
+                        page_id,
+                    )
+                    db.session.commit()
             
             logger.info(f"✅ Task {task_id} COMPLETED - Page {page_id} image generated")
         
@@ -681,7 +713,8 @@ def edit_page_image_task(task_id: str, project_id: str, page_id: str,
                          aspect_ratio: str = "16:9", resolution: str = "2K",
                          original_description: str = None,
                          additional_ref_images: List[str] = None,
-                         temp_dir: str = None, app=None):
+                         temp_dir: str = None, app=None,
+                         user_id: str = None):
     """
     Background task for editing a page image
     
@@ -752,6 +785,21 @@ def edit_page_image_task(task_id: str, project_id: str, page_id: str,
                 "failed": 0
             })
             db.session.commit()
+
+            if user_id:
+                from models import User
+                from services.credit_service import CreditService
+
+                user = User.query.get(user_id)
+                if user and user.role != 'admin':
+                    CreditService.deduct_credits(
+                        user,
+                        CreditService.COST_PER_IMAGE,
+                        'IMAGE_GENERATION',
+                        f'Page image edit - page {page_id}',
+                        page_id,
+                    )
+                    db.session.commit()
             
             logger.info(f"✅ Task {task_id} COMPLETED - Page {page_id} image edited")
         
@@ -789,7 +837,8 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
                                  additional_ref_images: List[str] = None,
                                  aspect_ratio: str = "16:9",
                                  resolution: str = "2K",
-                                 temp_dir: str = None, app=None):
+                                 temp_dir: str = None, app=None,
+                                 user_id: str = None):
     """
     Background task for generating a material image
     复用核心的generate_image逻辑，但保存到Material表而不是Page表
@@ -855,6 +904,21 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
                 "image_url": image_url
             })
             db.session.commit()
+
+            if user_id:
+                from models import User
+                from services.credit_service import CreditService
+
+                user = User.query.get(user_id)
+                if user and user.role != 'admin':
+                    CreditService.deduct_credits(
+                        user,
+                        CreditService.COST_PER_IMAGE,
+                        'IMAGE_GENERATION',
+                        'Material image generation',
+                        material.id,
+                    )
+                    db.session.commit()
             
             logger.info(f"✅ Task {task_id} COMPLETED - Material {material.id} generated")
         
