@@ -29,7 +29,7 @@ export type DescriptionContent =
 // 图片版本
 export interface ImageVersion {
   version_id: string;
-  page_id: string;
+  page_id?: string;
   image_path: string;
   image_url?: string;
   version_number: number;
@@ -39,8 +39,9 @@ export interface ImageVersion {
 
 // 页面
 export interface Page {
-  page_id: string;  // 后端返回 page_id
+  page_id?: string;  // 后端返回 page_id
   id?: string;      // 前端使用的别名
+  project_id?: string;
   order_index: number;
   part?: string; // 章节名
   outline_content: OutlineContent | null;
@@ -85,7 +86,32 @@ export interface Project {
 }
 
 // 任务状态
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type TaskStatus = 'PENDING' | 'PROCESSING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+
+export interface TaskProgress {
+  total: number;
+  completed: number;
+  failed?: number;
+  percent?: number;
+  current_step?: string;
+  messages?: string[];
+  warnings?: string[];
+  warning_message?: string;
+  help_text?: string;
+  warning_details?: {
+    style_extraction_failed?: Array<{ element_id: string; reason: string }>;
+    text_render_failed?: Array<{ text: string; reason: string }>;
+    image_add_failed?: Array<{ path: string; reason: string }>;
+    json_parse_failed?: Array<{ context: string; reason: string }>;
+    other_warnings?: string[];
+    total_warnings?: number;
+  };
+  download_url?: string;
+  filename?: string;
+  image_url?: string;
+  material_id?: string;
+  [key: string]: any;
+}
 
 // 任务信息
 export interface Task {
@@ -93,12 +119,7 @@ export interface Task {
   id?: string; // 别名
   task_type?: string;
   status: TaskStatus;
-  progress?: {
-    total: number;
-    completed: number;
-    failed?: number;
-    [key: string]: any; // 允许额外的字段，如material_id, image_url等
-  };
+  progress?: TaskProgress | string;
   error_message?: string;
   result?: any;
   error?: string; // 别名
@@ -167,4 +188,3 @@ export interface Settings {
   created_at?: string;
   updated_at?: string;
 }
-

@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { authApi, userApi, User, UserSettings, EffectiveConfig, AuthTokens } from '../api/auth';
+import { authApi, userApi, User, UserSettings, EffectiveConfig, type UpdateSettingsRequest } from '../api/auth';
 
 interface AuthState {
     // State
@@ -28,7 +28,7 @@ interface AuthState {
 
     // Settings actions
     fetchSettings: () => Promise<void>;
-    updateSettings: (data: Partial<UserSettings>) => Promise<void>;
+    updateSettings: (data: UpdateSettingsRequest) => Promise<void>;
     resetSetting: (key: string) => Promise<void>;
 
     // Utils
@@ -182,7 +182,7 @@ export const useAuthStore = create<AuthState>()(
             },
 
             // Update user settings
-            updateSettings: async (data) => {
+            updateSettings: async (data: UpdateSettingsRequest) => {
                 try {
                     const response = await userApi.updateSettings(data);
                     set({

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import * as api from '@/api/endpoints';
+import { parseTaskProgress } from '@/utils';
 import { devLog } from '@/utils/logger';
 import { getT } from '@/utils/i18nHelper';
 
@@ -28,6 +29,7 @@ export interface ExportTask {
     current_step?: string;
     messages?: string[];
     warnings?: string[];  // 导出警告信息
+    help_text?: string;
     warning_details?: {   // 警告详细信息
       style_extraction_failed?: Array<{ element_id: string; reason: string }>;
       text_render_failed?: Array<{ text: string; reason: string }>;
@@ -129,24 +131,19 @@ export const useExportTasksStore = create<ExportTasksState>()(
             };
 
             if (task.progress) {
-              // Parse progress if it's a string (from database JSON field)
-              let progressData = task.progress;
-              if (typeof progressData === 'string') {
-                try {
-                  progressData = JSON.parse(progressData);
-                } catch (e) {
-                  console.warn('[ExportTasksStore] Failed to parse progress:', e);
+              const progressData = parseTaskProgress(task.progress);
+              if (!progressData) {
+                console.warn('[ExportTasksStore] Failed to parse progress');
+              } else {
+                updates.progress = progressData;
+
+                // Extract download URL if available
+                if (progressData.download_url) {
+                  updates.downloadUrl = progressData.download_url;
                 }
-              }
-              
-              updates.progress = progressData;
-              
-              // Extract download URL if available
-              if (progressData.download_url) {
-                updates.downloadUrl = progressData.download_url;
-              }
-              if (progressData.filename) {
-                updates.filename = progressData.filename;
+                if (progressData.filename) {
+                  updates.filename = progressData.filename;
+                }
               }
             }
 
@@ -202,4 +199,3 @@ export const useExportTasksStore = create<ExportTasksState>()(
     }
   )
 );
-

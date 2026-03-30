@@ -36,6 +36,7 @@ export function getT<T extends Translations>(translations: T) {
     }
 
     // Fallback to global i18n
-    return i18n.t(key, params as any);
+    const fallback = i18n.t(key, params as any);
+    return typeof fallback === 'string' ? fallback : String(fallback);
   };
 }

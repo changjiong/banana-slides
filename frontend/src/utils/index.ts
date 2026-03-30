@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { Project, Page } from '@/types';
+import type { Project, Page, TaskProgress } from '@/types';
 
 /**
  * 合并 className (支持 Tailwind CSS)
@@ -30,6 +30,17 @@ export function normalizePage(data: any): Page {
     id: data.page_id || data.id,
     generated_image_path: data.generated_image_url || data.generated_image_path,
   };
+}
+
+export function parseTaskProgress(progress?: TaskProgress | string | null): TaskProgress | undefined {
+  if (!progress) return undefined;
+  if (typeof progress !== 'string') return progress;
+
+  try {
+    return JSON.parse(progress) as TaskProgress;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

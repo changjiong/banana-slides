@@ -13,6 +13,7 @@ import {
   arrayMove, SortableContext, useSortable, rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { parseTaskProgress } from '@/utils';
 
 // 组件内翻译
 const detailI18n = {
@@ -316,10 +317,11 @@ export const DetailEditor: React.FC = () => {
         if (!task) return;
         pollFailCount = 0; // reset on success
 
-        if (task.progress) {
+        const progress = parseTaskProgress(task.progress);
+        if (progress) {
           setRenovationProgress({
-            total: task.progress.total || 0,
-            completed: task.progress.completed || 0,
+            total: progress.total || 0,
+            completed: progress.completed || 0,
           });
         }
 
@@ -953,7 +955,7 @@ export const DetailEditor: React.FC = () => {
                     key={`skeleton-${index}`}
                     page={{ id: `skeleton-${index}`, title: '', sort_order: index, status: 'GENERATING_DESCRIPTION' } as any}
                     index={index}
-                    projectId={currentProject.id}
+                    projectId={currentProject.id!}
                     extraFieldNames={extraFieldNames}
                     imagePromptFields={imagePromptFields}
                     showToast={show}
@@ -964,6 +966,7 @@ export const DetailEditor: React.FC = () => {
               ) : (
                 currentProject.pages.map((page, index) => {
                 const pageId = page.id || page.page_id;
+                if (!pageId) return null;
                 // Renovation processing: treat pages without description as generating
                 const hasDescription = page.description_content && (
                   (typeof page.description_content === 'object' && 'text' in page.description_content && page.description_content.text?.trim())
@@ -976,7 +979,7 @@ export const DetailEditor: React.FC = () => {
                     key={pageId}
                     page={effectivePage}
                     index={index}
-                    projectId={currentProject.id}
+                    projectId={currentProject.id!}
                     extraFieldNames={extraFieldNames}
                     imagePromptFields={imagePromptFields}
                     showToast={show}
@@ -997,4 +1000,3 @@ export const DetailEditor: React.FC = () => {
     </div>
   );
 };
-
