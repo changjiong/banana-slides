@@ -37,6 +37,7 @@
 !README.md
 !README_EN.md
 !DEPLOYMENT.md
+!WORKFLOW.md
 # !docs/**/*.md
 !.github/**/*.md
 *.pyc
