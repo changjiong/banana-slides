@@ -80,7 +80,7 @@ test.describe('Import Markdown (mocked)', () => {
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockSettings()) }))
 
     await page.route('**/api/access-code/check', r =>
-      r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { required: false } }) }))
+      r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { enabled: false } }) }))
 
     await page.route('**/api/user-templates', r =>
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }))
@@ -220,11 +220,14 @@ test.describe('Import Markdown (mocked)', () => {
 
     // Use detail page "导出大纲+描述" for full export
     await page.goto(`/project/${PROJECT_ID}/detail`)
-    await page.waitForSelector('button:has-text("导出大纲+描述")', { timeout: 10_000 })
+    await page.waitForSelector('button:has-text("导入/导出")', { timeout: 10_000 })
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.click('button:has-text("导出大纲+描述")'),
+      (async () => {
+        await page.click('button:has-text("导入/导出")')
+        await page.click('button:has-text("导出大纲和描述")')
+      })(),
     ])
     const downloadPath = await download.path()
     const exportedContent = fs.readFileSync(downloadPath!, 'utf-8')

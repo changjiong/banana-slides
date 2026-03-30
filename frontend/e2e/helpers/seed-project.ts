@@ -30,6 +30,7 @@ function getFixtureImage(index: number): string {
 export interface SeededProject {
   projectId: string
   pageIds: string[]
+  sessionCookie?: string
 }
 
 /**
@@ -40,12 +41,21 @@ export async function seedProjectWithImages(
   baseUrl: string,
   pageCount = 1
 ): Promise<SeededProject> {
+  let sessionCookie: string | undefined
+
   const post = async (urlPath: string, body: object) => {
     const resp = await fetch(`${baseUrl}${urlPath}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionCookie ? { Cookie: sessionCookie } : {}),
+      },
       body: JSON.stringify(body),
     })
+    const setCookie = resp.headers.get('set-cookie')
+    if (setCookie) {
+      sessionCookie = setCookie.split(';', 1)[0]
+    }
     return resp.json()
   }
 
@@ -68,7 +78,7 @@ export async function seedProjectWithImages(
   }
 
   sql(`UPDATE projects SET status='IMAGES_GENERATED' WHERE id='${projectId}'`)
-  return { projectId, pageIds }
+  return { projectId, pageIds, sessionCookie }
 }
 
 // CLI entry point: npx tsx frontend/e2e/helpers/seed-project.ts [PAGE_COUNT]

@@ -32,6 +32,33 @@ test.describe('Skeleton during description re-generation', () => {
     let regenerationStarted = false
     let syncCountAfterRegen = 0
 
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem('banana-settings', JSON.stringify({
+        description_generation_mode: 'parallel',
+      }))
+    })
+
+    await page.route('**/api/settings', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            description_generation_mode: 'parallel',
+          },
+        }),
+      })
+    })
+
+    await page.route('**/api/access-code/check', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { enabled: false } }),
+      })
+    })
+
     // Mock GET project
     await page.route(`**/api/projects/${PROJECT_ID}`, async (route) => {
       if (route.request().method() !== 'GET') { await route.continue(); return }
@@ -110,11 +137,11 @@ test.describe('Skeleton during description re-generation', () => {
     })
 
     // Mock reference files
-    await page.route('**/api/projects/*/files*', async (route) => {
+    await page.route(`**/api/reference-files/project/${PROJECT_ID}`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: [] }),
+        body: JSON.stringify({ success: true, data: { files: [] } }),
       })
     })
 
@@ -129,12 +156,8 @@ test.describe('Skeleton during description re-generation', () => {
     // Click batch generate (triggers re-generation confirmation dialog)
     await page.getByRole('button', { name: /批量生成描述|Batch Generate/i }).click()
 
-    // Confirm the regeneration dialog (may or may not appear)
-    try {
-      await page.getByRole('button', { name: /确认|确定/ }).click({ timeout: 2000 })
-    } catch {
-      // Dialog may not appear, which is expected
-    }
+    // Confirm the regeneration dialog before polling starts.
+    await page.getByRole('button', { name: '确定' }).click()
 
     // After clicking generate, skeleton should appear — old descriptions should NOT be visible
     await expect(page.getByText(/生成中|Generating/).first()).toBeVisible({ timeout: 5000 })

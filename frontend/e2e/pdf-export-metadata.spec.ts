@@ -7,15 +7,16 @@ import { seedProjectWithImages } from './helpers/seed-project'
 
 test.describe('PDF Export - Backend API', () => {
   test('exports PDF with author metadata', async ({ request, baseURL }) => {
-    const { projectId } = await seedProjectWithImages(baseURL!, 2)
+    const { projectId, sessionCookie } = await seedProjectWithImages(baseURL!, 2)
+    const headers = sessionCookie ? { Cookie: sessionCookie } : undefined
 
-    const resp = await request.get(`/api/projects/${projectId}/export/pdf`)
+    const resp = await request.get(`/api/projects/${projectId}/export/pdf`, { headers })
     expect(resp.ok()).toBe(true)
     const data = (await resp.json()).data
     expect(data.download_url).toContain('.pdf')
 
     // Verify the PDF is downloadable
-    const fileResp = await request.get(data.download_url)
+    const fileResp = await request.get(data.download_url, { headers })
     expect(fileResp.ok()).toBe(true)
     expect(fileResp.headers()['content-type']).toContain('application/pdf')
 

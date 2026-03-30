@@ -25,30 +25,32 @@ test.describe('Export Images - Backend API', () => {
   })
 
   test('exports single image successfully', async ({ request, baseURL }) => {
-    const { projectId } = await seedProjectWithImages(baseURL!, 1)
+    const { projectId, sessionCookie } = await seedProjectWithImages(baseURL!, 1)
+    const headers = sessionCookie ? { Cookie: sessionCookie } : undefined
 
-    const resp = await request.get(`/api/projects/${projectId}/export/images`)
+    const resp = await request.get(`/api/projects/${projectId}/export/images`, { headers })
     expect(resp.ok()).toBe(true)
     const data = (await resp.json()).data
     expect(data.download_url).toContain(`/files/${projectId}/exports/`)
     expect(data.download_url).toContain('.jpg')
 
     // Verify the file is downloadable
-    const fileResp = await request.get(data.download_url)
+    const fileResp = await request.get(data.download_url, { headers })
     expect(fileResp.ok()).toBe(true)
     expect(fileResp.headers()['content-type']).toContain('image/jpeg')
   })
 
   test('exports multiple images as ZIP', async ({ request, baseURL }) => {
-    const { projectId } = await seedProjectWithImages(baseURL!, 2)
+    const { projectId, sessionCookie } = await seedProjectWithImages(baseURL!, 2)
+    const headers = sessionCookie ? { Cookie: sessionCookie } : undefined
 
-    const resp = await request.get(`/api/projects/${projectId}/export/images`)
+    const resp = await request.get(`/api/projects/${projectId}/export/images`, { headers })
     expect(resp.ok()).toBe(true)
     const data = (await resp.json()).data
     expect(data.download_url).toContain('.zip')
 
     // Verify the ZIP is downloadable
-    const fileResp = await request.get(data.download_url)
+    const fileResp = await request.get(data.download_url, { headers })
     expect(fileResp.ok()).toBe(true)
   })
 })
@@ -76,6 +78,14 @@ test.describe('Export Images - UI Mock', () => {
               ],
             },
           }),
+        })
+      }
+
+      if (url.pathname === '/api/access-code/check') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: { enabled: false } }),
         })
       }
 
@@ -141,6 +151,14 @@ test.describe('Export Images - UI Mock', () => {
               ],
             },
           }),
+        })
+      }
+
+      if (url.pathname === '/api/access-code/check') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: { enabled: false } }),
         })
       }
 

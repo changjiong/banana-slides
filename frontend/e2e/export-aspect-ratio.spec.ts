@@ -85,7 +85,12 @@ function cleanup(projectId: string) {
   assertUUID(projectId, 'projectId')
   const dir = path.join(UPLOADS_DIR, projectId)
   if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true })
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // Export artifacts may be created by the backend container user.
+      // Best-effort cleanup is sufficient for this verification test.
+    }
   }
   try {
     execSync(
@@ -145,6 +150,10 @@ test.describe.serial('Export aspect ratio', () => {
     expect(res.ok()).toBeTruthy()
     const body = await res.json()
     const downloadUrl = body.data.download_url_absolute
+
+    // Sanity check that the generated file is reachable before inspecting it on disk.
+    const fileRes = await request.get(downloadUrl)
+    expect(fileRes.ok()).toBeTruthy()
 
     // Extract slide dimensions from PPTX (ZIP containing XML)
     // The download_url is like /files/{id}/exports/file.pptx

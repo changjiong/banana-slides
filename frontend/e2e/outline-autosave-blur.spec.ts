@@ -45,7 +45,7 @@ test.describe('Outline auto-save on blur (mock)', () => {
     await page.waitForLoadState('networkidle')
 
     // Find the contenteditable editor in the left panel (desktop)
-    const editor = page.locator('[contenteditable="true"]').first()
+    const editor = page.locator('main [contenteditable="true"]').first()
     await expect(editor).toBeVisible()
 
     // Type new text
@@ -85,7 +85,7 @@ test.describe('Outline auto-save on blur (mock)', () => {
     await page.waitForLoadState('networkidle')
 
     // Click editor then blur without changing content
-    const editor = page.locator('[contenteditable="true"]').first()
+    const editor = page.locator('main [contenteditable="true"]').first()
     await editor.click()
     await page.locator('header').first().click()
 
@@ -97,20 +97,30 @@ test.describe('Outline auto-save on blur (mock)', () => {
 // Integration test: verify data persists after blur
 test.describe('Outline auto-save on blur (integration)', () => {
   let projectId: string
+  let sessionCookie: string | undefined
 
-  test.beforeEach(async ({ request }) => {
+  test.beforeEach(async ({ request, page, baseURL }) => {
     const res = await request.post('/api/projects', {
       data: { idea_prompt: 'Integration test idea', creation_type: 'idea' },
     })
+    const setCookie = res.headers()['set-cookie']
+    if (setCookie) {
+      sessionCookie = setCookie.split(';', 1)[0]
+    }
     const body = await res.json()
     projectId = body.data.project_id
+
+    if (sessionCookie && baseURL) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: baseURL }])
+    }
   })
 
   test('persists edited text after blur and page reload', async ({ page }) => {
     await page.goto(`/project/${projectId}/outline`)
     await page.waitForLoadState('networkidle')
 
-    const editor = page.locator('[contenteditable="true"]').first()
+    const editor = page.locator('main [contenteditable="true"]').first()
     await expect(editor).toBeVisible()
 
     // Edit the text
@@ -129,7 +139,7 @@ test.describe('Outline auto-save on blur (integration)', () => {
     await page.reload()
     await page.waitForLoadState('networkidle')
 
-    const editorAfter = page.locator('[contenteditable="true"]').first()
+    const editorAfter = page.locator('main [contenteditable="true"]').first()
     await expect(editorAfter).toContainText('auto saved', { timeout: 5000 })
   })
 })

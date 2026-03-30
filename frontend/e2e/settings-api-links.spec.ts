@@ -31,7 +31,7 @@ test.describe('Settings page API key labels and links', () => {
   });
 
   test('AIHubMix has apply link', async ({ page }) => {
-    const aihubLink = page.locator('a[href="https://aihubmix.com/token?aff=17EC"]');
+    const aihubLink = page.locator('a[href="https://aihubmix.com/?aff=17EC"]').first();
     await expect(aihubLink).toBeVisible();
     await expect(aihubLink).toHaveAttribute('target', '_blank');
   });

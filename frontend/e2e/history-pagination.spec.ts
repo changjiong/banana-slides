@@ -89,7 +89,11 @@ test.describe('History pagination — mock', () => {
     await setupMockRoutes(page, 3) // 3 < PAGE_SIZE, no pagination
     await page.goto('/history')
     await expect(page.getByRole('heading', { name: 'P-01', exact: true })).toBeVisible()
-    await expect(page.locator('nav[aria-label="Pagination"]')).not.toBeVisible()
+    const pagination = page.locator('nav[aria-label="Pagination"]')
+    await expect(pagination).toBeVisible()
+    await expect(pagination.locator('button[aria-current="page"]')).toHaveText('1')
+    await expect(pagination.getByRole('button', { name: 'Previous page' })).toBeDisabled()
+    await expect(pagination.getByRole('button', { name: 'Next page' })).toBeDisabled()
   })
 
   test('should show pagination when projects exceed one page', async ({
@@ -192,34 +196,51 @@ test.describe('History pagination — mock', () => {
 // ───────────────── Integration test ─────────────────
 
 test.describe('History pagination — integration', () => {
-  const frontendUrl = process.env.BASE_URL || 'http://localhost:3000'
-  const frontendPort = parseInt(new URL(frontendUrl).port || '3000')
-  const BACKEND_URL = `http://localhost:${frontendPort + 2000}`
-
-  async function createSimpleProject(index: number): Promise<string> {
-    const resp = await fetch(`${BACKEND_URL}/api/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ creation_type: 'idea', idea_prompt: `PagTest-${String(index).padStart(2, '0')}` }),
+  async function createSimpleProject(
+    request: import('@playwright/test').APIRequestContext,
+    index: number,
+    sessionCookie?: string,
+  ): Promise<{ projectId?: string; sessionCookie?: string }> {
+    const resp = await request.post('/api/projects', {
+      headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
+      data: { creation_type: 'idea', idea_prompt: `PagTest-${String(index).padStart(2, '0')}` },
     })
     const json = await resp.json()
-    return json.data?.project_id
+    const setCookie = resp.headers()['set-cookie']
+    return {
+      projectId: json.data?.project_id,
+      sessionCookie: sessionCookie || setCookie?.split(';', 1)[0],
+    }
   }
 
-  async function deleteProject(projectId: string) {
-    await fetch(`${BACKEND_URL}/api/projects/${projectId}`, { method: 'DELETE' })
+  async function deleteProject(
+    request: import('@playwright/test').APIRequestContext,
+    projectId: string,
+    sessionCookie?: string,
+  ) {
+    await request.delete(`/api/projects/${projectId}`, {
+      headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
+    })
   }
 
-  test('pagination works with real backend data', async ({ page }) => {
+  test('pagination works with real backend data', async ({ page, request, baseURL }) => {
     // Create 8 projects (enough for 2 pages with PAGE_SIZE=5)
     const projectIds: string[] = []
+    let sessionCookie: string | undefined
     for (let i = 0; i < 8; i++) {
-      const id = await createSimpleProject(i + 1)
+      const created = await createSimpleProject(request, i + 1, sessionCookie)
+      sessionCookie = created.sessionCookie
+      const id = created.projectId
       if (id) projectIds.push(id)
     }
     expect(projectIds.length).toBe(8)
 
     try {
+      if (sessionCookie && baseURL) {
+        const [name, value] = sessionCookie.split('=', 2)
+        await page.context().addCookies([{ name, value, url: baseURL }])
+      }
+
       await page.goto('/history')
       await page.waitForLoadState('networkidle')
 
@@ -239,7 +260,7 @@ test.describe('History pagination — integration', () => {
         pagination.locator('button[aria-current="page"]')
       ).toHaveText('2')
     } finally {
-      await Promise.all(projectIds.map(id => deleteProject(id)))
+      await Promise.all(projectIds.map(id => deleteProject(request, id, sessionCookie)))
     }
   })
 })

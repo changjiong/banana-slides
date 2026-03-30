@@ -237,13 +237,13 @@ test.describe('Streaming Descriptions - Integration Tests', () => {
     await gearBtn.click();
 
     // Check generation mode buttons
-    await expect(page.locator('text=流式').or(page.locator('text=Streaming'))).toBeVisible({ timeout: 3000 });
-    await expect(page.locator('text=并行').or(page.locator('text=Parallel'))).toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole('button', { name: /流式|Streaming/ }).first()).toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole('button', { name: /并行|Parallel/ }).first()).toBeVisible({ timeout: 3000 });
 
-    // Check detail level buttons
-    await expect(page.locator('text=精简').or(page.locator('text=Concise'))).toBeVisible();
-    await expect(page.locator('text=默认').or(page.locator('text=Default'))).toBeVisible();
-    await expect(page.getByRole('button', { name: /详细|Detailed/ })).toBeVisible();
+    // Detail-level controls are no longer shown in the settings panel.
+    await expect(page.getByRole('button', { name: /精简|Concise/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /默认|Default/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /详细|Detailed/ })).toHaveCount(0);
 
     // Check extra fields section
     await expect(page.locator('text=额外字段').or(page.locator('text=Extra Fields'))).toBeVisible();
@@ -351,19 +351,21 @@ test.describe('Streaming Descriptions - Integration Tests', () => {
     await editBtn.click();
 
     // Modal should be visible with extra field input
-    await expect(page.locator('label').filter({ hasText: '排版布局' })).toBeVisible({ timeout: 5000 });
-    const fieldTextarea = page.locator('textarea').filter({ hasText: '居中布局' });
-    await expect(fieldTextarea).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.locator('label').filter({ hasText: '排版布局' })).toBeVisible({ timeout: 5000 });
+    const fieldInput = dialog.getByRole('textbox').nth(1);
+    await expect(fieldInput).toBeVisible();
 
     // Edit the extra field value
-    await fieldTextarea.fill('左右分栏');
+    await fieldInput.fill('左右分栏');
 
     // Save
-    const saveBtn = page.locator('button').filter({ hasText: /保存|Save/ });
+    const saveBtn = dialog.locator('button').filter({ hasText: /保存|Save/ });
     await saveBtn.click();
 
-    // Verify the card shows updated value (use paragraph to avoid matching textarea)
-    await expect(page.getByRole('paragraph').filter({ hasText: '左右分栏' })).toBeVisible({ timeout: 5000 });
+    // Verify the first card shows the updated extra field value.
+    const firstCard = page.locator('[data-testid="description-card-content"]').first();
+    await expect(firstCard.getByText('左右分栏')).toBeVisible({ timeout: 5000 });
   });
 
   test('single page regeneration should still work', async ({ page }) => {

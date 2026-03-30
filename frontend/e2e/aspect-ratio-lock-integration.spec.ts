@@ -18,6 +18,10 @@ test.describe('Aspect ratio lock (integration)', () => {
     // Seed project with 1 page that has a real image
     const seeded = await seedProjectWithImages(API, 1)
     projectId = seeded.projectId
+    if (seeded.sessionCookie) {
+      const [name, value] = seeded.sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: BASE }])
+    }
 
     await page.goto(`/project/${projectId}/preview`)
     await page.waitForLoadState('networkidle')

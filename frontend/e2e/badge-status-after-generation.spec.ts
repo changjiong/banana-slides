@@ -1,4 +1,4 @@
-import { test, expect, Page, Route } from '@playwright/test'
+import { test, expect, Page } from '@playwright/test'
 import { seedProjectWithImages } from './helpers/seed-project'
 
 const PROJECT_ID = 'badge-race-mock'
@@ -119,7 +119,11 @@ test.describe('Badge status (integration)', () => {
   })
 
   test('seeded project shows COMPLETED badges on preview page', async ({ page, baseURL }) => {
-    const { projectId } = await seedProjectWithImages(baseURL!, 3)
+    const { projectId, sessionCookie } = await seedProjectWithImages(baseURL!, 3)
+    if (sessionCookie) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: baseURL! }])
+    }
 
     await page.goto(`/project/${projectId}/preview`)
     const badges = page.locator('[data-testid="status-badge"]')

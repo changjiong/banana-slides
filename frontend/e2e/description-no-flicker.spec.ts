@@ -29,6 +29,33 @@ test.describe('Description cards stability during generation', () => {
     let generationStarted = false
     let syncCountAfterGen = 0
 
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem('banana-settings', JSON.stringify({
+        description_generation_mode: 'parallel',
+      }))
+    })
+
+    await page.route('**/api/settings', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            description_generation_mode: 'parallel',
+          },
+        }),
+      })
+    })
+
+    await page.route('**/api/access-code/check', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { enabled: false } }),
+      })
+    })
+
     // Mock GET project
     await page.route(`**/api/projects/${PROJECT_ID}`, async (route) => {
       if (route.request().method() !== 'GET') { await route.continue(); return }
@@ -111,11 +138,11 @@ test.describe('Description cards stability during generation', () => {
     })
 
     // Mock reference files
-    await page.route('**/api/projects/*/files*', async (route) => {
+    await page.route(`**/api/reference-files/project/${PROJECT_ID}`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: [] }),
+        body: JSON.stringify({ success: true, data: { files: [] } }),
       })
     })
 

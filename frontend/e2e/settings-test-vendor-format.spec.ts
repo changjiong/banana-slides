@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
   await page.waitForLoadState('networkidle');
 });
 
-test('service test sends lazyllm format instead of raw vendor name', async ({ page }) => {
+test('service test sends selected vendor name instead of lazyllm umbrella value', async ({ page }) => {
   const section = page.getByTestId('global-api-config-section');
   const providerSelect = section.locator('select').first();
   await expect(providerSelect).toHaveValue('deepseek');
@@ -47,7 +47,7 @@ test('service test sends lazyllm format instead of raw vendor name', async ({ pa
   await textModelTestBtn.click();
 
   expect(capturedPayload).toBeTruthy();
-  expect(capturedPayload.ai_provider_format).toBe('lazyllm');
+  expect(capturedPayload.ai_provider_format).toBe('deepseek');
 });
 
 test('service test sends empty model source to clear saved per-model override', async ({ page }) => {

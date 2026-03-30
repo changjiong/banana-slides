@@ -192,13 +192,23 @@ test.describe('Generation requirements - DetailEditor (mock)', () => {
 
 test.describe('Generation requirements (integration)', () => {
   let projectId: string
+  let sessionCookie: string | undefined
 
-  test.beforeEach(async ({ request }) => {
+  test.beforeEach(async ({ request, page, baseURL }) => {
     const res = await request.post('/api/projects', {
       data: { idea_prompt: 'Integration test for requirements', creation_type: 'idea' },
     })
+    const setCookie = res.headers()['set-cookie']
+    if (setCookie) {
+      sessionCookie = setCookie.split(';', 1)[0]
+    }
     const body = await res.json()
     projectId = body.data.project_id
+
+    if (sessionCookie && baseURL) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: baseURL }])
+    }
   })
 
   test('outline requirements: save, reload, verify persisted', async ({ page }) => {
@@ -234,6 +244,7 @@ test.describe('Generation requirements (integration)', () => {
   test('description requirements: save, reload, verify persisted', async ({ page, request }) => {
     // Create a page so detail editor has content
     const outlineRes = await request.post(`/api/projects/${projectId}/pages`, {
+      headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
       data: {
         outline_content: { title: 'Test Page', points: ['Point 1'] },
         order_index: 0,
@@ -269,9 +280,10 @@ test.describe('Generation requirements (integration)', () => {
     await expect(editorAfter).toContainText('多使用数据和案例')
   })
 
-  test('clearing requirements saves empty string', async ({ page }) => {
+  test('clearing requirements saves empty string', async ({ page, request }) => {
     // First set a requirement via API
-    const setRes = await page.request.put(`/api/projects/${projectId}`, {
+    const setRes = await request.put(`/api/projects/${projectId}`, {
+      headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
       data: { outline_requirements: 'Temporary requirement' },
     })
     expect(setRes.ok()).toBeTruthy()

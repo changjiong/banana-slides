@@ -110,14 +110,20 @@ test.describe('Preview text style template - Mock tests', () => {
 
 test.describe('Preview text style template - Integration tests', () => {
   let projectId: string
+  let sessionCookie: string | undefined
 
   test.beforeAll(async () => {
     const seeded = await seedProjectWithImages(BACKEND_URL, 1)
     projectId = seeded.projectId
+    sessionCookie = seeded.sessionCookie
   })
 
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('hasSeenHelpModal', 'true'))
+    if (sessionCookie) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: BASE_URL }])
+    }
   })
 
   test('apply text style persists and survives reload', async ({ page }) => {

@@ -52,7 +52,7 @@ test.describe('Image generation error handling (mock)', () => {
     if (await genBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await genBtn.click()
       // Should show some error feedback (toast / alert)
-      const errorVisible = await page
+      const _errorVisible = await page
         .locator('[class*="error"], [class*="toast"], [role="alert"]')
         .first()
         .isVisible({ timeout: 10000 })
@@ -69,7 +69,11 @@ test.describe('Image generation error handling (mock)', () => {
 test.describe('Image generation endpoint (integration)', () => {
   test('generate-images endpoint responds without server crash', async ({ page }) => {
     // Seed a project with real images so we have a valid project_id
-    const { projectId } = await seedProjectWithImages(BASE, 1)
+    const { projectId, sessionCookie } = await seedProjectWithImages(BASE, 1)
+    if (sessionCookie) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: BASE }])
+    }
 
     // Navigate first so relative URLs resolve through Vite proxy
     await page.goto(BASE)

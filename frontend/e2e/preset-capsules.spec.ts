@@ -88,12 +88,12 @@ test.describe('Preset capsules - OutlineEditor (mock)', () => {
     await page.goto(`/project/${PROJECT_ID}/outline`)
     await page.waitForLoadState('networkidle')
 
-    const textarea = page.locator('[data-testid="outline-requirements-textarea"]')
+    const editor = page.locator('[data-testid="outline-requirements-textarea"] [contenteditable="true"]').first()
     const userPreset = page.locator('[data-testid="outline-user-preset-0"]')
     await expect(userPreset).toBeVisible()
     await userPreset.locator('button').first().click()
 
-    await expect(textarea).toHaveValue('测试提示词')
+    await expect(editor).toContainText('测试提示词')
   })
 
   test('can delete custom preset', async ({ page }) => {
@@ -185,13 +185,23 @@ test.describe('Preset capsules - DetailEditor (mock)', () => {
 
 test.describe('Preset capsules (integration)', () => {
   let projectId: string
+  let sessionCookie: string | undefined
 
-  test.beforeEach(async ({ request, page }) => {
+  test.beforeEach(async ({ request, page, baseURL }) => {
     const res = await request.post('/api/projects', {
       data: { idea_prompt: 'Preset integration test', creation_type: 'idea' },
     })
+    const setCookie = res.headers()['set-cookie']
+    if (setCookie) {
+      sessionCookie = setCookie.split(';', 1)[0]
+    }
     const body = await res.json()
     projectId = body.data.project_id
+
+    if (sessionCookie && baseURL) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: baseURL }])
+    }
 
     await page.goto('/')
     await page.evaluate(() => {
@@ -212,12 +222,12 @@ test.describe('Preset capsules (integration)', () => {
     await page.goto(`/project/${projectId}/outline`)
     await page.waitForLoadState('networkidle')
 
-    const textarea = page.locator('[data-testid="outline-requirements-textarea"]')
-    await expect(textarea).toBeVisible()
+    const editor = page.locator('[data-testid="outline-requirements-textarea"] [contenteditable="true"]').first()
+    await expect(editor).toBeVisible()
 
     // Click user preset
     await page.locator('[data-testid="outline-user-preset-0"]').locator('button').first().click()
-    await expect(textarea).toHaveValue('集成测试内容')
+    await expect(editor).toContainText('集成测试内容')
 
     // Wait for debounced auto-save
     const savePromise = page.waitForResponse(
@@ -229,9 +239,9 @@ test.describe('Preset capsules (integration)', () => {
     await page.reload()
     await page.waitForLoadState('networkidle')
 
-    const textareaAfter = page.locator('[data-testid="outline-requirements-textarea"]')
-    await expect(textareaAfter).toBeVisible()
-    await expect(textareaAfter).toHaveValue('集成测试内容')
+    const editorAfter = page.locator('[data-testid="outline-requirements-textarea"] [contenteditable="true"]').first()
+    await expect(editorAfter).toBeVisible()
+    await expect(editorAfter).toContainText('集成测试内容')
   })
 
   test('custom presets persist in localStorage across page navigations', async ({ page }) => {

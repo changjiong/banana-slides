@@ -165,57 +165,77 @@ test.describe('QUEUED status (integration)', () => {
     await page.addInitScript(() => localStorage.setItem('hasSeenHelpModal', 'true'))
   })
 
-  test('batch generate sets pages to QUEUED status in backend', async ({ baseURL }) => {
+  test('batch generate sets pages to QUEUED status in backend', async ({ request }) => {
+    let sessionCookie: string | undefined
+
+    const headers = () => (sessionCookie ? { Cookie: sessionCookie } : undefined)
+
     // Create a project with description content via API
-    const createRes = await fetch(`${baseURL}/api/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const createRes = await request.post('/api/projects', {
+      data: {
         idea_prompt: 'QUEUED status integration test',
         creation_type: 'idea',
-      }),
+      },
     })
+    const setCookie = createRes.headers()['set-cookie']
+    if (setCookie) {
+      sessionCookie = setCookie.split(';', 1)[0]
+    }
     const createData = await createRes.json()
     const projectId = createData.data.project_id || createData.data.id
 
     // Add description content to pages so they can be generated
-    const projectRes = await fetch(`${baseURL}/api/projects/${projectId}`)
+    let projectRes = await request.get(`/api/projects/${projectId}`, { headers: headers() })
     const projectData = await projectRes.json()
-    const pages = projectData.data.pages || []
+    let pages = projectData.data.pages || []
+
+    if (pages.length === 0) {
+      for (let i = 0; i < 3; i++) {
+        const addPageRes = await request.post(`/api/projects/${projectId}/pages`, {
+          headers: headers(),
+          data: {
+            outline_content: { title: `Queued Slide ${i + 1}`, points: [`Point ${i + 1}`] },
+            order_index: i,
+          },
+        })
+        expect(addPageRes.ok()).toBeTruthy()
+      }
+
+      projectRes = await request.get(`/api/projects/${projectId}`, { headers: headers() })
+      const refreshedProject = await projectRes.json()
+      pages = refreshedProject.data.pages || []
+    }
 
     for (const p of pages) {
       const pageId = p.page_id || p.id
-      await fetch(`${baseURL}/api/projects/${projectId}/pages/${pageId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await request.put(`/api/projects/${projectId}/pages/${pageId}`, {
+        headers: headers(),
+        data: {
           description_content: { text: `Test description for page ${pageId}` },
-        }),
+        },
       })
     }
 
     // Trigger batch generation — this should set pages to QUEUED immediately
     // We use a template_style since we don't have a template image
-    await fetch(`${baseURL}/api/projects/${projectId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template_style: 'modern minimalist' }),
+    await request.put(`/api/projects/${projectId}`, {
+      headers: headers(),
+      data: { template_style: 'modern minimalist' },
     })
 
-    const genRes = await fetch(`${baseURL}/api/projects/${projectId}/generate/images`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ max_workers: 1 }), // Use 1 worker so most pages stay QUEUED
+    const genRes = await request.post(`/api/projects/${projectId}/generate/images`, {
+      headers: headers(),
+      data: { max_workers: 1 }, // Use 1 worker so most pages stay QUEUED
     })
 
-    if (genRes.status !== 202) {
+    if (genRes.status() !== 202) {
       // May fail if no AI key configured — skip gracefully
       test.skip(true, 'Image generation not available (missing API key or config)')
       return
     }
 
     // Immediately check page statuses — they should be QUEUED
-    const checkRes = await fetch(`${baseURL}/api/projects/${projectId}`)
+    const checkRes = await request.get(`/api/projects/${projectId}`, { headers: headers() })
     const checkData = await checkRes.json()
     const checkPages = checkData.data.pages || []
 

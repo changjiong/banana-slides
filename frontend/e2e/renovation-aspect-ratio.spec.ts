@@ -18,12 +18,14 @@ const __dirname = path.dirname(__filename)
 test.describe.serial('Renovation aspect ratio', () => {
   test.setTimeout(60_000)
 
-  const createdProjects: string[] = []
+  const createdProjects: Array<{ id: string; sessionCookie?: string }> = []
 
   test.afterAll(async ({ request }) => {
-    for (const id of createdProjects) {
+    for (const { id, sessionCookie } of createdProjects) {
       try {
-        await request.delete(`${API}/api/projects/${id}`)
+        await request.delete(`${API}/api/projects/${id}`, {
+          headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
+        })
       } catch { /* best effort */ }
     }
   })
@@ -45,10 +47,13 @@ test.describe.serial('Renovation aspect ratio', () => {
 
     const body = await res.json()
     const projectId = body.data.project_id
-    createdProjects.push(projectId)
+    const sessionCookie = res.headers()['set-cookie']?.split(';', 1)[0]
+    createdProjects.push({ id: projectId, sessionCookie })
 
     // Fetch the project to check its aspect ratio
-    const projRes = await request.get(`${API}/api/projects/${projectId}`)
+    const projRes = await request.get(`${API}/api/projects/${projectId}`, {
+      headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
+    })
     expect(projRes.ok()).toBeTruthy()
 
     const projData = await projRes.json()
@@ -72,17 +77,20 @@ test.describe.serial('Renovation aspect ratio', () => {
 
     const body = await res.json()
     const projectId = body.data.project_id
-    createdProjects.push(projectId)
+    const sessionCookie = res.headers()['set-cookie']?.split(';', 1)[0]
+    createdProjects.push({ id: projectId, sessionCookie })
 
     // Fetch the project to check its aspect ratio
-    const projRes = await request.get(`${API}/api/projects/${projectId}`)
+    const projRes = await request.get(`${API}/api/projects/${projectId}`, {
+      headers: sessionCookie ? { Cookie: sessionCookie } : undefined,
+    })
     expect(projRes.ok()).toBeTruthy()
 
     const projData = await projRes.json()
     expect(projData.data.image_aspect_ratio).toBe('16:9')
   })
 
-  test('aspect ratio reflected in SlidePreview UI', async ({ page, request }) => {
+  test('aspect ratio reflected in SlidePreview UI', async ({ page, request, baseURL }) => {
     // Upload a 4:3 PDF
     const pdfPath = path.join(__dirname, 'fixtures', 'test-4-3.pdf')
     const pdfBuffer = fs.readFileSync(pdfPath)
@@ -100,14 +108,20 @@ test.describe.serial('Renovation aspect ratio', () => {
 
     const body = await res.json()
     const projectId = body.data.project_id
-    createdProjects.push(projectId)
+    const sessionCookie = res.headers()['set-cookie']?.split(';', 1)[0]
+    createdProjects.push({ id: projectId, sessionCookie })
+
+    if (sessionCookie && baseURL) {
+      const [name, value] = sessionCookie.split('=', 2)
+      await page.context().addCookies([{ name, value, url: baseURL }])
+    }
 
     // Navigate to SlidePreview
     await page.goto(`/project/${projectId}/preview`)
     await page.waitForLoadState('networkidle')
 
     // Open project settings
-    const settingsBtn = page.locator('button').filter({ hasText: /设置|Settings/ }).first()
+    const settingsBtn = page.getByRole('button', { name: /项目设置|Project Settings/ })
     await settingsBtn.click()
 
     // The 4:3 button should be the active/selected one (has border-banana-500 class)
